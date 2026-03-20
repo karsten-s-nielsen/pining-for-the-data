@@ -134,9 +134,7 @@ class TestGetArtifact(_ResetS3):
         from get_artifact import handler
 
         mock_s3 = _mock_s3()
-        mock_s3.list_objects_v2.return_value = {
-            "Contents": [{"Key": "metrica/game_03/tracking.txt"}]
-        }
+        mock_s3.list_objects_v2.return_value = {"Contents": [{"Key": "metrica/game_03/tracking.txt"}]}
         mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
 
         event = {

@@ -143,9 +143,7 @@ def _update_providers_json(s3, bucket: str, provider: str) -> None:
 
 def main() -> None:
     """CLI entry point for uploading game data to S3."""
-    parser = argparse.ArgumentParser(
-        description="Upload game artifacts to the mock provider API's S3 bucket"
-    )
+    parser = argparse.ArgumentParser(description="Upload game artifacts to the mock provider API's S3 bucket")
     parser.add_argument("game_dir", type=Path, help="Directory containing game artifacts")
     parser.add_argument("--provider", required=True, help="Provider name (e.g., metrica)")
     parser.add_argument("--game-id", required=True, help="Game identifier (e.g., game_03)")

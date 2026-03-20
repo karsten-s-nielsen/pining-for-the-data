@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Pre-commit
+.secrets.baseline
+
+# Ruff
+.ruff_cache/
+
+# Environment and secrets
+.env
+.env.*
+
+# Terraform state and secrets
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tracking data (never commit raw provider CSVs)
+*.csv
+!src/tests/fixtures/*.csv
+
+# Video files (never commit)
+*.mp4
+*.mov
+*.avi

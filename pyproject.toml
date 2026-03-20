@@ -14,18 +14,23 @@ dependencies = [
 publish = [
     "huggingface_hub>=0.25.0",
 ]
+aws = [
+    "boto3>=1.34.0",
+]
 dev = [
     "ruff>=0.3.0",
     "pyright>=1.1.350",
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "pre-commit>=3.6.0",
+    "boto3>=1.34.0",
 ]
 
 [project.scripts]
 pining-generate-roster = "deidentify.roster_generator:main"
 pining-ingest = "formats.metrica:main"
 pining-publish = "publish.hf_push:main"
+pining-upload = "mock_api.upload:main"
 
 [tool.ruff]
 target-version = "py312"

@@ -1,6 +1,6 @@
 # Architecture — pining-for-the-data
 
-> **Status**: Phase 1 (Metrica format) implemented, 44 tests passing.
+> **Status**: Phase 1 (Metrica format) + Mock Provider API implemented, 62 tests passing.
 > **Last Updated**: 2026-03-19
 > **Repository**: [`karstenskyt/pining-for-the-data`](https://github.com/karstenskyt/pining-for-the-data)
 
@@ -8,7 +8,7 @@
 
 ## 1. Purpose
 
-Tooling and infrastructure to de-identify, convert, and publish youth soccer tracking data as an open dataset. Companion to [luxury-lakehouse](https://github.com/karsten-s-nielsen/luxury-lakehouse).
+Tooling and infrastructure to de-identify, convert, and publish youth soccer tracking data as an open dataset. Companion to luxury-lakehouse.
 
 ---
 
@@ -97,13 +97,13 @@ Read provider-specific tracking data, apply de-identification, and write clean o
 
 ### 3.4 Mock API (`src/mock_api/`)
 
-Lambda handlers for mock provider REST API (Phase 3, not yet implemented).
+Upload CLI (`upload.py`) for S3 data management. Lambda handlers live in `terraform/modules/functions/src/`.
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /v1/matches` | List available de-identified matches |
-| `GET /v1/matches/{id}/tracking` | Download tracking data (CSV or JSON) |
-| `GET /v1/matches/{id}/roster` | Download de-identified lineup |
+| Endpoint | Handler | Purpose |
+|----------|---------|---------|
+| `GET /v1/providers` | `list_providers` | List supported tracking data providers |
+| `GET /v1/{provider}/matches` | `list_matches` | List available games + artifacts for a provider |
+| `GET /v1/{provider}/matches/{id}/{artifact}` | `get_artifact` | Serve artifact via presigned S3 URL (302 redirect) |
 
 ---
 
@@ -118,7 +118,7 @@ AWS (effectively $0/month at expected volume)
 └── Lambda               →  auth check + S3 presigned URL generation
 ```
 
-Terraform modules in `terraform/` (not yet implemented).
+Terraform modules in `terraform/`. See [setup guide](terraform/docs/setup.md).
 
 ---
 

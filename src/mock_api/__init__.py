@@ -1,1 +1,1 @@
-"""Lambda handlers for mock provider API (Level 2 — future)."""
+"""Upload CLI for mock provider API data management."""

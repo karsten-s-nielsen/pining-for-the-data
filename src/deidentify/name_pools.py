@@ -9,10 +9,6 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
 
 _POOLS_DIR = Path(__file__).resolve().parent.parent.parent / "name_pools"
 

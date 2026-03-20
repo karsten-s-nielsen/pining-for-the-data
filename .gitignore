@@ -29,6 +29,9 @@ htmlcov/
 # Ruff
 .ruff_cache/
 
+# Terraform build artifacts
+terraform/modules/functions/lambda.zip
+
 # Environment and secrets
 .env
 .env.*

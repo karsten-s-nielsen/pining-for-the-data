@@ -60,7 +60,7 @@ Actual artifact types TBD when sample data arrives from sales engagement.
   "matches": [
     {
       "id": "game_03",
-      "date": "2026-03-15",
+      "date": "2026-01-03",
       "home": "Wakanda FC",
       "away": "Shire Town",
       "artifacts": ["tracking", "metadata", "events", "roster"]
@@ -161,6 +161,7 @@ terraform/
 │       ├── variables.tf
 │       ├── outputs.tf
 │       └── src/
+│           ├── shared.py
 │           ├── list_providers.py
 │           ├── list_matches.py
 │           └── get_artifact.py

@@ -13,7 +13,7 @@
 > **Maintainer:** It's not synthetic. It's *pining*. It's pining for the data lake. Remarkable dataset, the Danish Blue, isn't it? Beautiful Parquet.
 
 <p align="center">
-  <img src="assets/pining-for-the-data.png" alt="pining-for-the-data — Dead Parrot sketch meets soccer analytics" width="800">
+  <img src="assets/pining-for-the-data.jpg" alt="pining-for-the-data — Dead Parrot sketch meets soccer analytics" width="800">
 </p>
 
 <sup>Comic by NanoBanana &mdash; inspired by Monty Python's *Dead Parrot*</sup>
@@ -26,7 +26,7 @@ Finding high-quality, open-source tracking data in soccer analytics is notorious
 
 **pining-for-the-data** is a CLI tooling pipeline designed to solve this. It ingests raw tracking feeds from providers like [Metrica Sports](https://metrica-sports.com/) and (soon) [Respo.Vision](https://respo.vision/), applies strict de-identification protocols, and maps player jersey numbers to persistent, fictional identities.
 
-The end result is clean, highly structured, and open-source youth soccer tracking data from real club matches, recorded on [Veo3](https://www.veo.co/) and published directly to [HuggingFace](https://huggingface.co/luxury-lakehouse) in Parquet format. It is the companion dataset for testing and scaling analytics platforms like [luxury-lakehouse](https://github.com/karsten-s-nielsen/luxury-lakehouse).
+The end result is clean, highly structured, and open-source youth soccer tracking data from real club matches, recorded on [Veo3](https://www.veo.co/) and published directly to [HuggingFace](https://huggingface.co/luxury-lakehouse) in Parquet format. It is the companion dataset for testing and scaling analytics platforms like luxury-lakehouse.
 
 The data isn't dead. It's just resting.
 
@@ -35,7 +35,7 @@ The data isn't dead. It's just resting.
 - **De-identification Engine** &mdash; Generates synthetic rosters and manages two-layer jersey mappings. Four hand-picked character names, the rest randomly generated from fictional universes (GOT, LOTR, Breaking Bad, Princess Bride, and more).
 - **Format Handlers** &mdash; Converts raw, provider-specific tracking data (CSV/JSON) into standardized outputs using pandas. Metrica Sports implemented; Respo.Vision 3D pose scaffolded.
 - **Automated Publication** &mdash; Pushes the de-identified tracking data and dataset cards directly to the HuggingFace Hub (CC-BY-4.0).
-- **Mock Provider API** &mdash; AWS-backed REST API mimicking real provider download protocols, so anyone can test ingestion adapters without a commercial account (planned).
+- **Mock Provider API** &mdash; AWS-backed REST API mimicking real provider download protocols, so anyone can test ingestion adapters without a commercial account.
 
 ## Distribution
 
@@ -43,6 +43,23 @@ The data isn't dead. It's just resting.
 |-------|------|-------|----------|
 | **Level 1** | Static Parquet files | [HuggingFace Hub](https://huggingface.co/luxury-lakehouse) | `load_dataset()` &mdash; zero |
 | **Level 2** | Mock REST API (Metrica protocol) | AWS (S3 + API Gateway + Lambda) | Bearer token auth &mdash; same code path as real provider |
+
+## Mock Provider API
+
+REST API mimicking commercial tracking data providers. Same bearer token auth, same endpoint shape, same response format.
+
+| Method | Path | Response |
+|--------|------|----------|
+| GET | `/v1/providers` | JSON list of supported providers |
+| GET | `/v1/{provider}/matches` | JSON list of games + available artifacts |
+| GET | `/v1/{provider}/matches/{id}/{artifact}` | 302 redirect to presigned S3 URL |
+
+```bash
+TOKEN="test-token-pining-for-the-data"
+curl -H "Authorization: Bearer $TOKEN" "$API_URL/v1/metrica/matches" | python -m json.tool
+```
+
+Deploy your own instance in ~15 minutes: [**Setup Guide**](terraform/docs/setup.md)
 
 ## Quick Start
 
@@ -63,7 +80,7 @@ uv run pytest
 ```bash
 uv run pining-generate-roster \
   --game-id game_03 \
-  --date 2026-03-15 \
+  --date 2026-01-03 \
   --home-jerseys 1,11,17,20,23,25,26,30,31,33,38,40,41,45 \
   --away-jerseys 2,5,8,10,14,18,22 \
   --opponent-index 16 \
@@ -117,8 +134,8 @@ pining-for-the-data/
 │   ├── deidentify/          # Roster generation, name pools, jersey mapping
 │   ├── formats/             # Provider format readers/writers (Metrica, Respo.Vision)
 │   ├── publish/             # HuggingFace Hub dataset publishing
-│   ├── mock_api/            # Lambda handlers for mock provider API (future)
-│   └── tests/               # pytest test suite (44 tests)
+│   ├── mock_api/            # Upload CLI for mock provider API
+│   └── tests/               # pytest test suite (62 tests)
 ├── name_pools/              # JSON name lists (fictional first/last names, cities)
 ├── rosters/                 # Generated de-identified rosters per game
 ├── terraform/               # AWS infrastructure (S3 + API Gateway + Lambda)
@@ -135,7 +152,7 @@ pining-for-the-data/
 - **Python 3.12+** with [uv](https://github.com/astral-sh/uv) for dependency management
 - **pandas + pyarrow** for data processing and Parquet output
 - **huggingface_hub** for dataset publishing (optional dependency)
-- **Terraform** for AWS mock API infrastructure (future)
+- **Terraform** for AWS mock API infrastructure
 - **ruff** for linting/formatting, **pyright** for type checking, **pytest** for testing
 
 ## License
@@ -145,5 +162,5 @@ Data (on HuggingFace Hub): [CC-BY-4.0](https://creativecommons.org/licenses/by/4
 
 ## Related
 
-- [luxury-lakehouse](https://github.com/karsten-s-nielsen/luxury-lakehouse) &mdash; the main analytics platform that ingests this data
+- luxury-lakehouse &mdash; the main analytics platform that ingests this data
 - [Metrica Sports open data](https://github.com/metrica-sports/sample-data) &mdash; the format standard this project follows

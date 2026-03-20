@@ -153,7 +153,7 @@ def process_game(
     tracking_path : Path
         Raw Metrica tracking CSV from the provider.
     roster_path : Path
-        De-identified roster JSON (from pfd-generate-roster).
+        De-identified roster JSON (from pining-generate-roster).
     output_dir : Path
         Directory for output files.
     output_format : str

@@ -1,14 +1,14 @@
 # pining-for-the-data
 
 De-identified youth soccer tracking data — open dataset and mock provider API.
-Companion repo to [luxury-lakehouse](https://github.com/karsten-s-nielsen/luxury-lakehouse).
+Companion repo to luxury-lakehouse.
 
 ## Architecture
 
 - `src/deidentify/` — name pools, roster generation, two-layer jersey→identity mapping
 - `src/formats/` — provider format readers/writers (Metrica CSV, Respo.Vision JSON future)
 - `src/publish/` — HuggingFace Hub dataset publishing
-- `src/mock_api/` — Lambda handlers for mock provider REST API (Level 2)
+- `src/mock_api/` — Upload CLI for mock provider API data management
 - `src/tests/` — pytest test suite
 - `name_pools/` — JSON name lists (fictional first/last names, cities)
 - `rosters/` — generated de-identified roster JSONs per game
@@ -37,3 +37,4 @@ Companion repo to [luxury-lakehouse](https://github.com/karsten-s-nielsen/luxury
 - `pining-generate-roster` — generate a synthetic roster for a game
 - `pining-ingest` — read raw provider CSV, apply de-identification, output clean Parquet
 - `pining-publish` — push Parquet to HuggingFace Hub
+- `pining-upload` — upload game artifacts to S3 and update provider indexes

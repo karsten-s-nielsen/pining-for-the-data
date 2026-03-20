@@ -63,8 +63,7 @@ Code: [MIT](https://opensource.org/licenses/MIT)
 
 ## Source
 
-Companion dataset to [luxury-lakehouse](https://github.com/karsten-s-nielsen/luxury-lakehouse),
-a serverless soccer analytics platform.
+Companion dataset to luxury-lakehouse, a serverless soccer analytics platform.
 
 Code and tooling: [pining-for-the-data](https://github.com/karstenskyt/pining-for-the-data)
 """

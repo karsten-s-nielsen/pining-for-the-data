@@ -104,7 +104,7 @@ class TwoLayerMapping:
         return renames
 
     @classmethod
-    def from_roster_file(cls, path: str | bytes) -> TwoLayerMapping:
+    def from_roster_file(cls, path: str) -> TwoLayerMapping:
         """Load from a roster JSON file."""
         import json
         from pathlib import Path

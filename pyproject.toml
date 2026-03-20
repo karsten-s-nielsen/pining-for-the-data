@@ -59,6 +59,9 @@ known-first-party = ["deidentify", "formats", "publish", "mock_api"]
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
+extraPaths = ["terraform/modules/functions/src"]
+ignore = ["src/tests/test_lambda_handlers.py"]
+reportMissingImports = "warning"
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]

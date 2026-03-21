@@ -1,7 +1,3 @@
-"""Shared test fixtures."""
-
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
@@ -18,8 +14,3 @@ def fixtures_dir() -> Path:
 @pytest.fixture
 def name_pools_dir() -> Path:
     return NAME_POOLS_DIR
-
-
-@pytest.fixture
-def sample_tracking_csv(fixtures_dir: Path) -> Path:
-    return fixtures_dir / "sample_tracking.csv"

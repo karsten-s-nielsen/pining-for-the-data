@@ -9,9 +9,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import boto3
+
+_SAFE_PARAM = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _validate_param(value: str, name: str) -> None:
+    """Raise ValueError if param contains unsafe characters."""
+    if not value or not _SAFE_PARAM.match(value) or len(value) > 128:
+        raise ValueError(f"Invalid {name}: must be 1-128 alphanumeric/dash/underscore characters")
 
 
 def upload_game(
@@ -22,6 +31,10 @@ def upload_game(
     date: str | None = None,
     home: str | None = None,
     away: str | None = None,
+    provenance: str | None = None,
+    source_name: str | None = None,
+    source_url: str | None = None,
+    source_license: str | None = None,
 ) -> list[str]:
     """Upload all files in game_dir to S3 and update indexes.
 
@@ -30,7 +43,7 @@ def upload_game(
     game_dir : Path
         Directory containing artifact files (tracking.txt, metadata.xml, etc.)
     provider : str
-        Provider name (e.g., "metrica", "respovision").
+        Provider name (e.g., "skillcorner", "respovision").
     game_id : str
         Game identifier (e.g., "game_03").
     bucket : str
@@ -41,12 +54,23 @@ def upload_game(
         Home team name for the matches index.
     away : str | None
         Away team name for the matches index.
+    provenance : str | None
+        How the data reached the platform ("redistributed", "deidentified", "original").
+    source_name : str | None
+        Name of the original data source.
+    source_url : str | None
+        URL of the original data source.
+    source_license : str | None
+        License of the original data source.
 
     Returns
     -------
     list[str]
         List of uploaded artifact names.
     """
+    _validate_param(provider, "provider")
+    _validate_param(game_id, "game_id")
+
     s3 = boto3.client("s3")
 
     # Upload all files in the directory
@@ -64,7 +88,9 @@ def upload_game(
         return artifacts
 
     # Update indexes
-    _update_matches_json(s3, bucket, provider, game_id, artifacts, date, home, away)
+    _update_matches_json(
+        s3, bucket, provider, game_id, artifacts, date, home, away, provenance, source_name, source_url, source_license
+    )
     _update_providers_json(s3, bucket, provider)
 
     return artifacts
@@ -79,6 +105,10 @@ def _update_matches_json(
     date: str | None,
     home: str | None,
     away: str | None,
+    provenance: str | None = None,
+    source_name: str | None = None,
+    source_url: str | None = None,
+    source_license: str | None = None,
 ) -> None:
     """Read-modify-write the matches.json index for a provider."""
     key = f"{provider}/matches.json"
@@ -101,6 +131,14 @@ def _update_matches_json(
         entry["home"] = home
     if away:
         entry["away"] = away
+    if provenance:
+        entry["provenance"] = provenance
+    if source_name:
+        entry["source"] = {
+            "name": source_name,
+            "url": source_url or "",
+            "license": source_license or "",
+        }
 
     if existing:
         idx = data["matches"].index(existing)
@@ -145,12 +183,21 @@ def main() -> None:
     """CLI entry point for uploading game data to S3."""
     parser = argparse.ArgumentParser(description="Upload game artifacts to the mock provider API's S3 bucket")
     parser.add_argument("game_dir", type=Path, help="Directory containing game artifacts")
-    parser.add_argument("--provider", required=True, help="Provider name (e.g., metrica)")
+    parser.add_argument("--provider", required=True, help="Provider name (e.g., skillcorner)")
     parser.add_argument("--game-id", required=True, help="Game identifier (e.g., game_03)")
     parser.add_argument("--bucket", required=True, help="S3 bucket name")
     parser.add_argument("--date", default=None, help="Game date (YYYY-MM-DD)")
     parser.add_argument("--home", default=None, help="Home team name")
     parser.add_argument("--away", default=None, help="Away team name")
+    parser.add_argument(
+        "--provenance",
+        default=None,
+        choices=["redistributed", "deidentified", "original"],
+        help="How the data reached the platform",
+    )
+    parser.add_argument("--source-name", default=None, help="Name of the original data source")
+    parser.add_argument("--source-url", default=None, help="URL of the original data source")
+    parser.add_argument("--source-license", default=None, help="License of the original data source")
     args = parser.parse_args()
 
     if not args.game_dir.is_dir():
@@ -165,5 +212,9 @@ def main() -> None:
         date=args.date,
         home=args.home,
         away=args.away,
+        provenance=args.provenance,
+        source_name=args.source_name,
+        source_url=args.source_url,
+        source_license=args.source_license,
     )
     print(f"Done — {len(artifacts)} artifact(s) uploaded.")

@@ -1,7 +1,8 @@
-"""Push de-identified tracking data to HuggingFace Hub.
+"""Push tracking data to HuggingFace Hub.
 
-Publishes Parquet files as a HuggingFace Dataset under the luxury-lakehouse
-organization. Generates/updates the dataset card with CC-BY-4.0 license metadata.
+Publishes SkillCorner V3 tracking data as a HuggingFace Dataset under the
+luxury-lakehouse organization. Generates/updates the dataset card with MIT
+license metadata (redistributed from SkillCorner open data).
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ HF_REPO_ID = f"{HF_ORG}/{HF_DATASET}"
 
 DATASET_CARD_TEMPLATE = """\
 ---
-license: cc-by-4.0
+license: mit
 language:
   - en
 tags:
@@ -22,46 +23,50 @@ tags:
   - football
   - tracking-data
   - sports-analytics
-  - de-identified
-  - youth-soccer
-pretty_name: "Pining for the Data — De-identified Youth Soccer Tracking"
+  - skillcorner
+pretty_name: "Pining for the Data — Open Soccer Tracking"
 size_categories:
   - 1K<n<10K
 ---
 
 # Pining for the Data
 
-De-identified XY tracking data from youth club soccer matches, recorded on
-Veo3 and processed through commercial tracking providers.
+Soccer tracking data in SkillCorner V3 format (match JSON + tracking JSONL at 10fps),
+redistributed as-is from [SkillCorner open data](https://github.com/SkillCorner/opendata) under the MIT license.
 
 > *"It's not pinin', it's passed on! This parrot is no more!"*
 > — Monty Python's Flying Circus, Dead Parrot sketch
 
 ## What This Is
 
-Real match tracking data from youth club soccer,
-fully de-identified with synthetic player and team names sourced from
-GOT, LOTR, Breaking Bad, Princess Bride, and other fictional universes.
+Tracking data from SkillCorner open data (MIT license). See NOTICE.
 
-- **Home team:** Wakanda FC
-- **Format:** Metrica Sports CSV (0-1 normalized XY coordinates)
-- **Coordinate system:** (0,0) = top-left, (1,1) = bottom-right
-- **Frame rate:** 25 fps
+- **Format:** SkillCorner V3 (match JSON + tracking JSONL)
+- **Frame rate:** 10 fps
+- **Data:** Redistributed as-is, no de-identification applied
 
 ## Usage
 
 ```python
-from datasets import load_dataset
+import json
 
-ds = load_dataset("{repo_id}")
+# Load match metadata
+with open("match.json") as f:
+    match = json.load(f)
+
+# Load tracking frames
+with open("tracking.jsonl") as f:
+    frames = [json.loads(line) for line in f]
 ```
 
 ## License
 
-Data: [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
+Data: [MIT](https://opensource.org/licenses/MIT) (redistributed from SkillCorner open data)
 Code: [MIT](https://opensource.org/licenses/MIT)
 
 ## Source
+
+Tracking data from [SkillCorner open data](https://github.com/SkillCorner/opendata) (MIT license). See NOTICE.
 
 Companion dataset to luxury-lakehouse, a serverless soccer analytics platform.
 
@@ -71,7 +76,7 @@ Code and tooling: [pining-for-the-data](https://github.com/karstenskyt/pining-fo
 
 def generate_dataset_card() -> str:
     """Generate the dataset card markdown."""
-    return DATASET_CARD_TEMPLATE.format(repo_id=HF_REPO_ID)
+    return DATASET_CARD_TEMPLATE
 
 
 def push_to_hub(
@@ -134,7 +139,7 @@ def main() -> None:
     """CLI entry point for publishing to HuggingFace Hub."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Push de-identified tracking data to HuggingFace Hub")
+    parser = argparse.ArgumentParser(description="Push tracking data to HuggingFace Hub")
     parser.add_argument("parquet_dir", type=Path, help="Directory containing .parquet files")
     parser.add_argument("--repo-id", default=HF_REPO_ID, help=f"HF dataset repo ID (default: {HF_REPO_ID})")
     parser.add_argument("--message", default=None, help="Commit message")

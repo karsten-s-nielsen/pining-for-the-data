@@ -24,25 +24,27 @@
 
 Finding high-quality, open-source tracking data in soccer analytics is notoriously difficult. Datasets are either locked behind commercial licenses or plagued by privacy concerns regarding player identification.
 
-**pining-for-the-data** is a CLI tooling pipeline designed to solve this. It ingests raw tracking feeds from providers like [Metrica Sports](https://metrica-sports.com/) and (soon) [Respo.Vision](https://respo.vision/), applies strict de-identification protocols, and maps player jersey numbers to persistent, fictional identities.
+**pining-for-the-data** redistributes [SkillCorner open data](https://github.com/SkillCorner/opendata) (MIT license) in SkillCorner V3 format (match JSON + tracking JSONL at 10fps), with CLI tooling to validate, publish, and serve it through a mock provider API. A de-identification engine is included for future use with private/commercial tracking data from providers like [Respo.Vision](https://respo.vision/).
 
-The end result is clean, highly structured, and open-source youth soccer tracking data from real club matches, recorded on [Veo3](https://www.veo.co/) and published directly to [HuggingFace](https://huggingface.co/luxury-lakehouse) in Parquet format. It is the companion dataset for testing and scaling analytics platforms like luxury-lakehouse.
+The end result is clean, highly structured, and open-source soccer tracking data published directly to [HuggingFace](https://huggingface.co/luxury-lakehouse) and served through a mock REST API. It is the companion dataset for testing and scaling analytics platforms like luxury-lakehouse.
+
+> **Note:** SkillCorner open data is redistributed as-is under its MIT license — no de-identification is applied. See [`NOTICE`](NOTICE) for attribution. The de-identification system is reserved for future private data sources.
 
 The data isn't dead. It's just resting.
 
 ## Key Features
 
 - **De-identification Engine** &mdash; Generates synthetic rosters and manages two-layer jersey mappings. Four hand-picked character names, the rest randomly generated from fictional universes (GOT, LOTR, Breaking Bad, Princess Bride, and more).
-- **Format Handlers** &mdash; Converts raw, provider-specific tracking data (CSV/JSON) into standardized outputs using pandas. Metrica Sports implemented; Respo.Vision 3D pose scaffolded.
-- **Automated Publication** &mdash; Pushes the de-identified tracking data and dataset cards directly to the HuggingFace Hub (CC-BY-4.0).
+- **Format Handlers** &mdash; Validates and processes provider-specific tracking data (SkillCorner V3 JSON/JSONL). Respo.Vision 3D pose scaffolded for future use.
+- **Automated Publication** &mdash; Pushes tracking data and dataset cards directly to the HuggingFace Hub.
 - **Mock Provider API** &mdash; AWS-backed REST API mimicking real provider download protocols, so anyone can test ingestion adapters without a commercial account.
 
 ## Distribution
 
 | Level | What | Where | Friction |
 |-------|------|-------|----------|
-| **Level 1** | Static Parquet files | [HuggingFace Hub](https://huggingface.co/luxury-lakehouse) | `load_dataset()` &mdash; zero |
-| **Level 2** | Mock REST API (Metrica protocol) | AWS (S3 + API Gateway + Lambda) | Bearer token auth &mdash; same code path as real provider |
+| **Level 1** | Static JSON/JSONL files | [HuggingFace Hub](https://huggingface.co/luxury-lakehouse) | `load_dataset()` &mdash; zero |
+| **Level 2** | Mock REST API (SkillCorner protocol) | AWS (S3 + API Gateway + Lambda) | Bearer token auth &mdash; same code path as real provider |
 
 ## Mock Provider API
 
@@ -56,7 +58,7 @@ REST API mimicking commercial tracking data providers. Same bearer token auth, s
 
 ```bash
 TOKEN="test-token-pining-for-the-data"
-curl -H "Authorization: Bearer $TOKEN" "$API_URL/v1/metrica/matches" | python -m json.tool
+curl -H "Authorization: Bearer $TOKEN" "$API_URL/v1/skillcorner/matches" | python -m json.tool
 ```
 
 Deploy your own instance in ~15 minutes: [**Setup Guide**](terraform/docs/setup.md)
@@ -87,13 +89,10 @@ uv run pining-generate-roster \
   --seed 42
 ```
 
-### De-identify Tracking Data
+### Validate Tracking Data
 
 ```bash
-uv run pining-ingest tracking_data.csv \
-  --roster rosters/game_03.json \
-  --output-dir output/ \
-  --format both
+uv run pining-ingest match.json tracking.jsonl
 ```
 
 ### Publish to HuggingFace
@@ -102,9 +101,11 @@ uv run pining-ingest tracking_data.csv \
 uv run pining-publish output/ --message "Add Game 03 tracking data"
 ```
 
-## De-identification
+## De-identification (for future private data)
 
-All player identities are synthetic. The home team (**Wakanda FC**) roster uses a two-layer mapping:
+SkillCorner open data is redistributed as-is — no de-identification is applied. The de-identification engine below is retained for future use with private/commercial tracking data.
+
+The home team (**Wakanda FC**) roster uses a two-layer mapping:
 
 - **Layer 1 (private):** Player &rarr; stable synthetic identity (same player is always the same character across all games)
 - **Layer 2 (per-game):** Jersey number &rarr; synthetic identity (handles number changes between games)
@@ -132,10 +133,10 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full written architecture docum
 pining-for-the-data/
 ├── src/
 │   ├── deidentify/          # Roster generation, name pools, jersey mapping
-│   ├── formats/             # Provider format readers/writers (Metrica, Respo.Vision)
+│   ├── formats/             # Provider format readers/writers (SkillCorner, Respo.Vision)
 │   ├── publish/             # HuggingFace Hub dataset publishing
 │   ├── mock_api/            # Upload CLI for mock provider API
-│   └── tests/               # pytest test suite (62 tests)
+│   └── tests/               # pytest test suite (64 tests)
 ├── name_pools/              # JSON name lists (fictional first/last names, cities)
 ├── rosters/                 # Generated de-identified rosters per game
 ├── terraform/               # AWS infrastructure (S3 + API Gateway + Lambda)
@@ -158,9 +159,9 @@ pining-for-the-data/
 ## License
 
 Code: [MIT](LICENSE)
-Data (on HuggingFace Hub): [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
+Redistributed SkillCorner data: [MIT](NOTICE)
 
 ## Related
 
 - luxury-lakehouse &mdash; the main analytics platform that ingests this data
-- [Metrica Sports open data](https://github.com/metrica-sports/sample-data) &mdash; the format standard this project follows
+- [SkillCorner open data](https://github.com/SkillCorner/opendata) &mdash; source tracking data (MIT license)

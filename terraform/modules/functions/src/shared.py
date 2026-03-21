@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import os
 import re
 
 import boto3
 from botocore.config import Config
+
+logger = logging.getLogger(__name__)
 
 # Force SigV4 for presigned URLs (required for KMS-encrypted buckets)
 _s3_config = Config(signature_version="s3v4")
@@ -50,7 +53,7 @@ def validate_path_param(value: str, name: str) -> dict | None:
 
     Returns None if valid, or an error response dict if invalid.
     """
-    if not value or not _SAFE_PARAM.match(value):
+    if not value or len(value) > 128 or not _SAFE_PARAM.match(value):
         return _error_response(400, f"Invalid {name}: must be alphanumeric, hyphens, or underscores")
     return None
 

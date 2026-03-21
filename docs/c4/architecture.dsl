@@ -1,67 +1,62 @@
-workspace "pining-for-the-data" "De-identified youth soccer tracking data pipeline and mock provider API" {
+workspace "pining-for-the-data" "Open soccer tracking data redistribution and mock provider API" {
 
     model {
-        researcher = person "Soccer Researcher" "Data scientist or analyst working with tracking data"
-        dataOwner = person "Data Owner" "Records games, runs de-identification, uploads data"
+        analyst = person "Soccer Analyst" "Researcher or data scientist analyzing tracking data"
+        developer = person "Platform Developer" "Developer building ingestion pipelines against mock provider API"
 
-        luxuryLakehouse = softwareSystem "luxury-lakehouse" "Serverless soccer analytics platform that ingests tracking data" "External"
-        metrica = softwareSystem "Metrica Sports" "Commercial tracking data provider (GameCloud)" "External"
-        hfHub = softwareSystem "HuggingFace Hub" "Dataset hosting platform (Level 1 distribution)" "External"
-        veo = softwareSystem "Veo3 Camera" "Records youth soccer matches in broadcast mode" "External"
-
-        pining = softwareSystem "pining-for-the-data" "De-identification pipeline and mock provider API for open soccer tracking data" {
-            deidentify = container "De-identification Engine" "Generates synthetic rosters, maps jersey numbers to fictional identities" "Python" {
-                namePools = component "Name Pools" "Loads and samples from fictional name lists (GOT, LOTR, BB, etc.)" "Python module"
-                rosterGen = component "Roster Generator" "Produces per-game rosters with featured + random names" "Python module"
-                mapping = component "Two-Layer Mapping" "Resolves jersey numbers to synthetic identities per game" "Python module"
-            }
-            formats = container "Format Handlers" "Reads provider-specific tracking data, applies de-identification, writes clean output" "Python" {
-                metricaFmt = component "Metrica Format" "Reads/writes Metrica CSV (0-1 normalized XY)" "Python module"
-                respoFmt = component "Respo.Vision Format" "Reads 3D pose data (scaffolded)" "Python module"
-                convert = component "Format Converter" "Projects 3D to 2D (scaffolded)" "Python module"
-            }
-            publish = container "Publisher" "Pushes Parquet datasets to HuggingFace Hub with CC-BY-4.0 license" "Python"
-            uploadCli = container "Upload CLI" "Uploads game artifacts to S3, maintains provider and match indexes" "Python (pining-upload)"
-            apiGateway = container "API Gateway" "HTTP API routing requests to Lambda handlers" "AWS API Gateway v2 (HTTP)"
-            listProviders = container "list_providers" "Returns list of supported tracking data providers" "AWS Lambda (Python 3.12)"
-            listMatches = container "list_matches" "Returns available games and artifacts for a provider" "AWS Lambda (Python 3.12)"
-            getArtifact = container "get_artifact" "Generates presigned S3 URL for artifact download" "AWS Lambda (Python 3.12)"
-            dataBucket = container "Data Bucket" "Stores tracking data, metadata, and discovery indexes" "AWS S3 (KMS-encrypted)" "Database"
+        pining = softwareSystem "pining-for-the-data" "Redistributes MIT-licensed SkillCorner tracking data via HuggingFace Hub and a mock provider API" {
+            ingestCli = container "Ingest CLI" "Validates SkillCorner V3 match JSON + tracking JSONL" "Python 3.12+, pining-ingest"
+            rosterCli = container "Roster Generator CLI" "Generates synthetic rosters with fictional identities for future private data" "Python 3.12+, pining-generate-roster"
+            deidentify = container "De-identification Engine" "Two-layer jersey-to-identity mapping using fictional name pools (GOT, LOTR, BB, etc.)" "Python 3.12+"
+            formats = container "Format Handlers" "Read, write, and validate SkillCorner V3 format; Respo.Vision scaffolded" "Python 3.12+, JSON/JSONL"
+            uploadCli = container "Upload CLI" "Uploads game artifacts to S3 and maintains discovery indexes" "Python 3.12+, boto3, pining-upload"
+            publishCli = container "Publish CLI" "Pushes Parquet files and dataset cards to HuggingFace Hub" "Python 3.12+, huggingface_hub, pining-publish"
+            apiGateway = container "API Gateway" "REST API with bearer token auth, stage-level throttling (10 rps)" "AWS API Gateway HTTP API"
+            lambdaProviders = container "list_providers" "Returns JSON list of available tracking data providers" "AWS Lambda, Python 3.12"
+            lambdaMatches = container "list_matches" "Returns JSON list of games and artifacts for a provider" "AWS Lambda, Python 3.12"
+            lambdaArtifact = container "get_artifact" "Generates presigned S3 URL and returns 302 redirect" "AWS Lambda, Python 3.12"
+            dataBucket = container "Data Bucket" "Stores tracking files organized by provider/game (match JSON, tracking JSONL, events CSV, phases CSV)" "AWS S3, KMS-SSE" "Database"
         }
 
-        veo -> metrica "Broadcast footage uploaded to" "Video upload"
-        metrica -> dataOwner "Delivers tracking CSV/XML via" "EPTS export"
-        dataOwner -> deidentify "Runs de-identification pipeline" "CLI"
-        dataOwner -> formats "Processes raw provider data" "CLI"
-        dataOwner -> publish "Publishes datasets" "CLI (pining-publish)"
-        dataOwner -> uploadCli "Uploads game artifacts" "CLI (pining-upload)"
-        publish -> hfHub "Pushes Parquet files to" "HuggingFace Hub API"
-        researcher -> hfHub "Downloads datasets via" "load_dataset()"
-        researcher -> apiGateway "Queries mock provider API" "HTTPS + Bearer token"
-        luxuryLakehouse -> apiGateway "Ingests tracking data from" "HTTPS + Bearer token"
+        skillcorner = softwareSystem "SkillCorner Open Data" "MIT-licensed A-League tracking data (10 matches at 10fps)" "External"
+        huggingface = softwareSystem "HuggingFace Hub" "Dataset hosting platform (Level 1 distribution)" "External"
+        luxuryLakehouse = softwareSystem "luxury-lakehouse" "Serverless soccer analytics platform that ingests tracking data" "External"
 
-        uploadCli -> dataBucket "Uploads artifacts and updates indexes" "AWS SDK (boto3)"
-        apiGateway -> listProviders "Routes GET /providers" "AWS Lambda proxy"
-        apiGateway -> listMatches "Routes GET /{provider}/matches" "AWS Lambda proxy"
-        apiGateway -> getArtifact "Routes GET /{provider}/matches/{id}/{artifact}" "AWS Lambda proxy"
-        listProviders -> dataBucket "Reads providers.json" "AWS SDK (boto3)"
-        listMatches -> dataBucket "Reads {provider}/matches.json" "AWS SDK (boto3)"
-        getArtifact -> dataBucket "Generates presigned URL for artifact" "AWS SDK (boto3)"
-        formats -> deidentify "Uses roster mappings from" "Python import"
+        analyst -> huggingface "Downloads tracking data" "load_dataset() / HTTPS"
+        developer -> apiGateway "Tests ingestion adapters against mock API" "HTTPS + Bearer token"
+        analyst -> apiGateway "Downloads tracking artifacts" "HTTPS + Bearer token"
+        luxuryLakehouse -> apiGateway "Ingests tracking data via provider adapter" "HTTPS + Bearer token"
 
-        production = deploymentEnvironment "AWS Production" {
+        skillcorner -> formats "Source tracking data (git clone)" "Git LFS"
+
+        ingestCli -> formats "Validates match + tracking files" "Python import"
+        rosterCli -> deidentify "Generates synthetic rosters" "Python import"
+        uploadCli -> dataBucket "Uploads game artifacts + indexes" "boto3 S3 API"
+        publishCli -> huggingface "Pushes Parquet + dataset card" "HuggingFace API"
+
+        apiGateway -> lambdaProviders "GET /v1/providers" "Lambda proxy"
+        apiGateway -> lambdaMatches "GET /v1/{provider}/matches" "Lambda proxy"
+        apiGateway -> lambdaArtifact "GET /v1/{provider}/matches/{id}/{artifact}" "Lambda proxy"
+        lambdaProviders -> dataBucket "Reads providers.json" "S3 GetObject"
+        lambdaMatches -> dataBucket "Reads {provider}/matches.json" "S3 GetObject"
+        lambdaArtifact -> dataBucket "Lists + presigns artifact files" "S3 ListObjects + presign"
+
+        production = deploymentEnvironment "Production" {
             deploymentNode "AWS" "Amazon Web Services" "us-east-1" {
-                deploymentNode "API Gateway" "HTTP API with throttling" "AWS API Gateway v2" {
+                deploymentNode "API Gateway" "HTTP API with CORS, throttling (10 rps / 50 burst)" "AWS API Gateway v2" {
                     containerInstance apiGateway
                 }
-                deploymentNode "Lambda" "Serverless compute" "Python 3.12, 128MB" {
-                    containerInstance listProviders
-                    containerInstance listMatches
-                    containerInstance getArtifact
+                deploymentNode "Lambda" "Serverless compute (5 reserved concurrency, X-Ray tracing)" "AWS Lambda, Python 3.12" {
+                    containerInstance lambdaProviders
+                    containerInstance lambdaMatches
+                    containerInstance lambdaArtifact
                 }
-                deploymentNode "S3" "Object storage" "KMS-encrypted, versioned" {
+                deploymentNode "S3" "Object storage with KMS-CMK encryption and versioning" "AWS S3" {
                     containerInstance dataBucket
                 }
+            }
+            deploymentNode "HuggingFace" "Dataset hosting platform" "SaaS" {
+                hfInstance = softwareSystemInstance huggingface
             }
         }
     }
@@ -77,28 +72,21 @@ workspace "pining-for-the-data" "De-identified youth soccer tracking data pipeli
             autoLayout
         }
 
-        component deidentify "DeidentifyComponents" {
-            include *
+        dynamic pining "ArtifactDownload" {
+            analyst -> apiGateway "Requests match list with bearer token"
+            apiGateway -> lambdaMatches "Routes to list_matches handler"
+            lambdaMatches -> dataBucket "Reads skillcorner/matches.json"
+            lambdaMatches -> apiGateway "Returns 200 with match index"
+            apiGateway -> analyst "JSON response with game list"
+            analyst -> apiGateway "Requests tracking artifact"
+            apiGateway -> lambdaArtifact "Routes to get_artifact handler"
+            lambdaArtifact -> dataBucket "Generates presigned URL for file"
+            lambdaArtifact -> apiGateway "Returns 302 redirect"
+            apiGateway -> analyst "Redirects to presigned S3 download"
             autoLayout
         }
 
-        dynamic pining "ResearcherFlow" {
-            researcher -> apiGateway "Requests match list with bearer token"
-            apiGateway -> listMatches "Routes to list_matches Lambda"
-            listMatches -> dataBucket "Reads metrica/matches.json"
-            dataBucket -> listMatches "Returns match index JSON"
-            listMatches -> apiGateway "Returns 200 with matches"
-            apiGateway -> researcher "JSON response with game list"
-            researcher -> apiGateway "Requests tracking artifact"
-            apiGateway -> getArtifact "Routes to get_artifact Lambda"
-            getArtifact -> dataBucket "Generates presigned URL"
-            dataBucket -> getArtifact "Returns presigned URL"
-            getArtifact -> apiGateway "Returns 302 redirect"
-            apiGateway -> researcher "Redirects to presigned S3 URL"
-            autoLayout
-        }
-
-        deployment pining "AWS Production" "Deployment" {
+        deployment pining production "Deployment" {
             include *
             autoLayout
         }
@@ -127,6 +115,9 @@ workspace "pining-for-the-data" "De-identified youth soccer tracking data pipeli
             element "Component" {
                 background #85BBF0
                 color #000000
+            }
+            relationship "Relationship" {
+                color #707070
             }
         }
     }

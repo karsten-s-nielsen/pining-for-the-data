@@ -6,7 +6,7 @@ Companion repo to luxury-lakehouse.
 ## Architecture
 
 - `src/deidentify/` — name pools, roster generation, two-layer jersey→identity mapping
-- `src/formats/` — provider format readers/writers (Metrica CSV, Respo.Vision JSON future)
+- `src/formats/` — provider format readers/writers (SkillCorner V3 JSON/JSONL, Respo.Vision JSON future)
 - `src/publish/` — HuggingFace Hub dataset publishing
 - `src/mock_api/` — Upload CLI for mock provider API data management
 - `src/tests/` — pytest test suite
@@ -21,10 +21,13 @@ Companion repo to luxury-lakehouse.
 - Pyright for type checking (basic mode)
 - pytest for testing (src/tests/)
 - Pre-commit hooks: ruff, yaml checks, secret scanning
-- No tracking data CSVs in the repo — too large for git
-- MIT license (code), CC-BY-4.0 (data on HF Hub)
+- No tracking data files in the repo — too large for git
+- MIT license (code + redistributed SkillCorner data), CC-BY-4.0 (dataset card on HF Hub)
 
-## De-identification
+## De-identification (for future private data)
+
+SkillCorner open data is redistributed as-is (MIT license) — no de-identification applied.
+The de-identification engine is retained for future use with private/commercial tracking data:
 
 - Home team: Wakanda FC
 - 4 featured names: Fezzik Took, Tormund Tully, Westley Montoya, T'Challa Stark
@@ -35,6 +38,6 @@ Companion repo to luxury-lakehouse.
 ## CLI Entry Points
 
 - `pining-generate-roster` — generate a synthetic roster for a game
-- `pining-ingest` — read raw provider CSV, apply de-identification, output clean Parquet
+- `pining-ingest` — validate SkillCorner V3 match JSON + tracking JSONL
 - `pining-publish` — push Parquet to HuggingFace Hub
 - `pining-upload` — upload game artifacts to S3 and update provider indexes

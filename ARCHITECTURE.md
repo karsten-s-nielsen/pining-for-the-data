@@ -1,55 +1,58 @@
 # Architecture — pining-for-the-data
 
-> **Status**: Phase 1 (Metrica format) + Mock Provider API implemented, 62 tests passing.
-> **Last Updated**: 2026-03-19
+> **Status**: SkillCorner V3 format + Mock Provider API implemented.
+> **Last Updated**: 2026-03-20
 > **Repository**: [`karstenskyt/pining-for-the-data`](https://github.com/karstenskyt/pining-for-the-data)
 
 ---
 
 ## 1. Purpose
 
-Tooling and infrastructure to de-identify, convert, and publish youth soccer tracking data as an open dataset. Companion to luxury-lakehouse.
+Tooling and infrastructure to redistribute, validate, and publish soccer tracking data as an open dataset. SkillCorner open data (MIT license) is redistributed as-is; a de-identification engine is included for future use with private/commercial data. Companion to luxury-lakehouse.
 
 ---
 
 ## 2. Data Flow
 
 ```
-Veo3 Camera ──> Commercial Provider ──> Raw Tracking CSV/JSON
-                (Metrica / Respo.Vision)        │
-                                                 ▼
-                                    ┌─────────────────────┐
-                                    │  pining-for-the-data │
-                                    │                     │
-                                    │  1. Read raw format  │
-                                    │  2. De-identify      │
-                                    │  3. Write Parquet    │
-                                    └──────┬──────┬───────┘
-                                           │      │
-                              ┌────────────┘      └────────────┐
-                              ▼                                ▼
-                    ┌──────────────────┐             ┌──────────────────┐
-                    │  HuggingFace Hub │             │   AWS Mock API   │
-                    │  (Level 1)       │             │   (Level 2)      │
-                    │                  │             │                  │
-                    │  load_dataset()  │             │  GET /v1/matches │
-                    │  Zero friction   │             │  Bearer token    │
-                    └──────────────────┘             └──────────────────┘
-                              │                                │
-                              └──────────┬─────────────────────┘
-                                         ▼
-                              ┌──────────────────────┐
-                              │   luxury-lakehouse    │
-                              │                       │
-                              │  src/ingestion/       │
-                              │    metrica.py          │
-                              │    provider_framework/ │
-                              │                       │
-                              │  Same adapter code    │
-                              │  works against mock   │
-                              │  and real provider    │
-                              └──────────────────────┘
+SkillCorner Open Data (MIT) ──> match.json + tracking.jsonl (10fps)
+                                        │
+                                        ▼
+                           ┌─────────────────────┐
+                           │  pining-for-the-data │
+                           │                     │
+                           │  1. Validate format  │
+                           │  2. Redistribute     │
+                           └──────┬──────┬───────┘
+                                  │      │
+                     ┌────────────┘      └────────────┐
+                     ▼                                ▼
+           ┌──────────────────┐             ┌──────────────────┐
+           │  HuggingFace Hub │             │   AWS Mock API   │
+           │  (Level 1)       │             │   (Level 2)      │
+           │                  │             │                  │
+           │  load_dataset()  │             │  GET /v1/matches │
+           │  Zero friction   │             │  Bearer token    │
+           └──────────────────┘             └──────────────────┘
+                     │                                │
+                     └──────────┬─────────────────────┘
+                                ▼
+                     ┌──────────────────────┐
+                     │   luxury-lakehouse    │
+                     │                       │
+                     │  src/ingestion/       │
+                     │    skillcorner.py      │
+                     │    provider_framework/ │
+                     │                       │
+                     │  Same adapter code    │
+                     │  works against mock   │
+                     │  and real provider    │
+                     └──────────────────────┘
 ```
+
+**Two modes:**
+- **As-is redistribution** (SkillCorner open data): validate and publish, no transformation
+- **De-identification** (future private data): full synthetic identity pipeline via RosterGenerator + TwoLayerMapping
 
 ---
 
@@ -81,19 +84,19 @@ Layer 1 ensures analytical continuity. Layer 2 handles jersey number changes.
 
 ### 3.2 Format Handlers (`src/formats/`)
 
-Read provider-specific tracking data, apply de-identification, and write clean output.
+Read and validate provider-specific tracking data.
 
 | Module | Status | Provider | Format |
 |--------|--------|----------|--------|
-| `metrica.py` | Implemented | Metrica Sports | CSV, 0-1 normalized XY, 3-row header |
+| `skillcorner.py` | Implemented | SkillCorner | V3 match JSON + tracking JSONL at 10fps |
 | `respovision.py` | Scaffolded | Respo.Vision | JSON, 3D pose, 50+ keypoints |
-| `convert.py` | Scaffolded | Cross-format | Respo.Vision 3D -> Metrica-equivalent 2D |
+| `convert.py` | Scaffolded | Cross-format | Respo.Vision 3D -> SkillCorner-equivalent 2D |
 
 ### 3.3 Publishing (`src/publish/`)
 
 | Module | Responsibility |
 |--------|---------------|
-| `hf_push.py` | Push Parquet to HuggingFace Hub with CC-BY-4.0 dataset card. CLI entry point. |
+| `hf_push.py` | Push Parquet to HuggingFace Hub with MIT dataset card. CLI entry point. |
 
 ### 3.4 Mock API (`src/mock_api/`)
 
@@ -112,7 +115,7 @@ Upload CLI (`upload.py`) for S3 data management. Lambda handlers live in `terraf
 ```
 AWS (effectively $0/month at expected volume)
 ├── S3 bucket
-│   ├── private prefix  →  source-of-truth CSVs (versioned)
+│   ├── private prefix  →  source-of-truth JSON/JSONL (versioned)
 │   └── public prefix   →  served via presigned URLs
 ├── API Gateway          →  REST endpoints mimicking provider protocol
 └── Lambda               →  auth check + S3 presigned URL generation
@@ -126,12 +129,12 @@ Terraform modules in `terraform/`. See [setup guide](terraform/docs/setup.md).
 
 ```
 luxury-lakehouse (analytics platform)         pining-for-the-data (open data)
-├── src/ingestion/metrica.py ──────────────→  Mock API serves same CSV format
+├── src/ingestion/skillcorner.py ──────────→  Mock API serves same JSON/JSONL format
 ├── src/ingestion/provider_framework/  ────→  Adapters work against mock + real
 └── fct_tracking_frames                       Data flows in identically
 ```
 
-The mock API is designed so that `luxury-lakehouse`'s existing Metrica ingestion code works against it unmodified. Same bearer token auth, same CSV schema, same download protocol.
+The mock API is designed so that `luxury-lakehouse`'s existing SkillCorner ingestion code works against it unmodified. Same bearer token auth, same JSON/JSONL schema, same download protocol.
 
 ---
 
@@ -144,5 +147,5 @@ The mock API is designed so that `luxury-lakehouse`'s existing Metrica ingestion
 | Python version | 3.12+ | No Databricks constraint (luxury-lakehouse is pinned to 3.10) |
 | Data format | Parquet via pyarrow | Columnar, compressed, HF-native |
 | License (code) | MIT | Simple permissive — no business logic to protect |
-| License (data) | CC-BY-4.0 | Standard for open datasets, attribution only |
+| License (data) | MIT | Redistributed from SkillCorner open data (MIT license) |
 | Repo name | pining-for-the-data | Dead Parrot sketch — "pining for the fjords" Danish Easter egg |

@@ -1,0 +1,108 @@
+{
+  "id": 9999999,
+  "home_team_score": 2,
+  "away_team_score": 1,
+  "date_time": "2025-01-15T19:00:00Z",
+  "status": "closed",
+  "pitch_length": 105,
+  "pitch_width": 68,
+  "ball": {"trackable_object": 55},
+  "home_team_side": ["right_to_left", "left_to_right"],
+  "home_team": {
+    "id": 100,
+    "name": "Auckland FC",
+    "short_name": "Auckland",
+    "acronym": "AKL"
+  },
+  "away_team": {
+    "id": 200,
+    "name": "Wellington Phoenix FC",
+    "short_name": "Wellington",
+    "acronym": "WEL"
+  },
+  "home_team_kit": {
+    "id": 1, "team_id": 100,
+    "season": {"id": 95, "start_year": 2024, "end_year": 2025, "name": "2024/2025"},
+    "name": "Home", "jersey_color": "#001489", "number_color": "#FFFFFF"
+  },
+  "away_team_kit": {
+    "id": 2, "team_id": 200,
+    "season": {"id": 95, "start_year": 2024, "end_year": 2025, "name": "2024/2025"},
+    "name": "Away", "jersey_color": "#FFC72C", "number_color": "#000000"
+  },
+  "home_team_coach": {"id": 1, "first_name": "John", "last_name": "Smith"},
+  "away_team_coach": {"id": 2, "first_name": "Jane", "last_name": "Doe"},
+  "home_team_playing_time": {"minutes_tip": 32.5, "minutes_otip": 12.5},
+  "away_team_playing_time": {"minutes_tip": 12.5, "minutes_otip": 32.5},
+  "competition_edition": {
+    "id": 870,
+    "competition": {"id": 61, "area": "Australia", "name": "A-League Men", "gender": "male", "age_group": "adult"},
+    "season": {"id": 95, "start_year": 2024, "end_year": 2025, "name": "2024/2025"},
+    "name": "A-League Men 2024/2025"
+  },
+  "competition_round": {"id": 1, "name": "Round 10", "round_number": 10, "potential_overtime": false},
+  "stadium": {"id": 500, "name": "Go Media Stadium", "city": "Auckland", "capacity": 25000},
+  "referees": [
+    {"id": 301, "first_name": "Alex", "last_name": "King", "referee_role": 1, "start_time": "00:00:00", "end_time": null, "replaced_by": null, "trackable_object": 60}
+  ],
+  "match_periods": [
+    {"period": 1, "name": "First half", "start_frame": 10, "end_frame": 30, "duration_frames": 20, "duration_minutes": 45.0},
+    {"period": 2, "name": "Second half", "start_frame": 40, "end_frame": 60, "duration_frames": 20, "duration_minutes": 45.0}
+  ],
+  "players": [
+    {
+      "id": 1001, "first_name": "Hiroshi", "last_name": "Tanaka", "short_name": "H. Tanaka",
+      "birthday": "1998-03-15", "gender": "male",
+      "team_id": 100, "team_player_id": 5001, "trackable_object": 101,
+      "number": 1,
+      "player_role": {"id": 0, "name": "Goalkeeper", "acronym": "GK", "position_group": "Goalkeeper"},
+      "start_time": "00:00:00", "end_time": null,
+      "yellow_card": 0, "red_card": 0, "injured": false, "goal": 0, "own_goal": 0
+    },
+    {
+      "id": 1002, "first_name": "Marcus", "last_name": "Webb", "short_name": "M. Webb",
+      "birthday": "2000-07-22", "gender": "male",
+      "team_id": 100, "team_player_id": 5002, "trackable_object": 102,
+      "number": 11,
+      "player_role": {"id": 12, "name": "Left Wing", "acronym": "LW", "position_group": "Forward"},
+      "start_time": "00:00:00", "end_time": null,
+      "yellow_card": 1, "red_card": 0, "injured": false, "goal": 1, "own_goal": 0
+    },
+    {
+      "id": 1003, "first_name": "Diego", "last_name": "Morales", "short_name": "D. Morales",
+      "birthday": "1996-11-01", "gender": "male",
+      "team_id": 100, "team_player_id": 5003, "trackable_object": 103,
+      "number": 17,
+      "player_role": {"id": 15, "name": "Striker", "acronym": "CF", "position_group": "Forward"},
+      "start_time": "00:00:00", "end_time": null,
+      "yellow_card": 0, "red_card": 0, "injured": false, "goal": 2, "own_goal": 0
+    },
+    {
+      "id": 2001, "first_name": "Liam", "last_name": "O'Connor", "short_name": "L. O'Connor",
+      "birthday": "1999-01-10", "gender": "male",
+      "team_id": 200, "team_player_id": 6001, "trackable_object": 201,
+      "number": 7,
+      "player_role": {"id": 13, "name": "Right Wing", "acronym": "RW", "position_group": "Forward"},
+      "start_time": "00:00:00", "end_time": null,
+      "yellow_card": 0, "red_card": 0, "injured": false, "goal": 1, "own_goal": 0
+    },
+    {
+      "id": 2002, "first_name": "Ravi", "last_name": "Patel", "short_name": "R. Patel",
+      "birthday": "1997-05-30", "gender": "male",
+      "team_id": 200, "team_player_id": 6002, "trackable_object": 202,
+      "number": 9,
+      "player_role": {"id": 15, "name": "Striker", "acronym": "CF", "position_group": "Forward"},
+      "start_time": "00:00:00", "end_time": null,
+      "yellow_card": 0, "red_card": 0, "injured": false, "goal": 0, "own_goal": 0
+    },
+    {
+      "id": 2003, "first_name": "James", "last_name": "Mitchell", "short_name": "J. Mitchell",
+      "birthday": "2001-09-18", "gender": "male",
+      "team_id": 200, "team_player_id": 6003, "trackable_object": 203,
+      "number": 23,
+      "player_role": {"id": 0, "name": "Goalkeeper", "acronym": "GK", "position_group": "Goalkeeper"},
+      "start_time": "00:00:00", "end_time": null,
+      "yellow_card": 0, "red_card": 0, "injured": false, "goal": 0, "own_goal": 0
+    }
+  ]
+}

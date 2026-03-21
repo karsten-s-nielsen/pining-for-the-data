@@ -110,7 +110,7 @@ Upload a game:
 
 ```bash
 uv run pining-upload path/to/game_03/ \
-  --provider metrica \
+  --provider skillcorner \
   --game-id game_03 \
   --bucket "karstenskyt-pining-for-the-data" \
   --date 2026-01-03 \
@@ -119,8 +119,8 @@ uv run pining-upload path/to/game_03/ \
 ```
 
 The upload CLI:
-1. Uploads all files in the directory to `s3://{bucket}/metrica/game_03/`
-2. Creates/updates `metrica/matches.json` with the game entry
+1. Uploads all files in the directory to `s3://{bucket}/skillcorner/game_03/`
+2. Creates/updates `skillcorner/matches.json` with the game entry
 3. Creates/updates `providers.json` with the provider
 
 ---
@@ -135,11 +135,11 @@ API="https://XXXXXXXXXX.execute-api.us-east-1.amazonaws.com/v1"
 curl -s -H "Authorization: Bearer $TOKEN" "$API/providers" | python -m json.tool
 
 # List matches for a provider
-curl -s -H "Authorization: Bearer $TOKEN" "$API/metrica/matches" | python -m json.tool
+curl -s -H "Authorization: Bearer $TOKEN" "$API/skillcorner/matches" | python -m json.tool
 
 # Download an artifact (follows redirect to presigned S3 URL)
 curl -s -L -H "Authorization: Bearer $TOKEN" \
-  "$API/metrica/matches/game_03/tracking" -o tracking.txt
+  "$API/skillcorner/matches/game_03/tracking" -o tracking.txt
 ls -la tracking.txt
 
 # Verify auth rejection
@@ -164,7 +164,7 @@ What you'll customize:
 | Project name | `terraform.tfvars` | `pining-for-the-data` |
 | AWS region | `terraform.tfvars` | `us-east-1` |
 | API token | `terraform.tfvars` | `test-token-pining-for-the-data` |
-| Provider name | `pining-upload --provider` | `metrica` |
+| Provider name | `pining-upload --provider` | `skillcorner` |
 
 ### Adding a New Provider
 

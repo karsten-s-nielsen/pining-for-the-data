@@ -88,21 +88,6 @@ class TwoLayerMapping:
     def away_players(self) -> list[JerseyMapping]:
         return sorted(self._away_map.values(), key=lambda m: m.jersey)
 
-    def to_column_rename_map(self, team: str) -> dict[str, str]:
-        """Generate a column rename mapping for tracking data.
-
-        Converts provider column names like 'Home_14_x' → 'tchalla_stark_x'.
-        Used when applying de-identification to raw Metrica CSVs.
-        """
-        mapping: dict[int, JerseyMapping] = self._home_map if team == "home" else self._away_map
-        prefix = "Home" if team == "home" else "Away"
-        renames: dict[str, str] = {}
-        for jersey, identity in mapping.items():
-            pid = identity.player_id
-            renames[f"{prefix}_{jersey}_x"] = f"{pid}_x"
-            renames[f"{prefix}_{jersey}_y"] = f"{pid}_y"
-        return renames
-
     @classmethod
     def from_roster_file(cls, path: str) -> TwoLayerMapping:
         """Load from a roster JSON file."""

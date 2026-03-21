@@ -26,7 +26,7 @@ will handle 135K frames x 22 players in under a second.
 ## What we know about the format (from public docs)
 
 - REST API delivery: GET /v1/matches/{id}/tracking → JSON
-- Player identification by jersey number (same as Metrica)
+- Player identification by jersey number
 - Keypoints likely follow COCO or custom skeleton topology
 - Confidence scores per keypoint (useful for quality filtering)
 - Ball tracking included (3D)
@@ -34,7 +34,7 @@ will handle 135K frames x 22 players in under a second.
 
 ## De-identification approach
 
-Same as Metrica: apply TwoLayerMapping to replace jersey-keyed player IDs
+Apply TwoLayerMapping to replace jersey-keyed player IDs
 with synthetic names. The keypoint data itself contains no PII — it's just
 coordinates. Only the player identifiers need swapping.
 """
@@ -108,7 +108,7 @@ class RespoPlayerFrame:
     def centroid_xy(self) -> tuple[float, float]:
         """Project 3D pose to 2D centroid (drop Z, average keypoints).
 
-        This is the Metrica-equivalent position for this player.
+        This is the 2D tracking-equivalent position for this player.
         Optionally filter by confidence threshold before averaging.
         """
         if not self.keypoints:

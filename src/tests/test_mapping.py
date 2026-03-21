@@ -87,20 +87,6 @@ class TestTwoLayerMapping:
         assert len(players) == 2
         assert players[0].jersey < players[1].jersey
 
-    def test_column_rename_map(self) -> None:
-        mapping = TwoLayerMapping(_make_game_roster())
-        renames = mapping.to_column_rename_map("home")
-        assert renames["Home_1_x"] == "fezzik_took_x"
-        assert renames["Home_1_y"] == "fezzik_took_y"
-        assert renames["Home_41_x"] == "tchalla_stark_x"
-        assert renames["Home_41_y"] == "tchalla_stark_y"
-
-    def test_column_rename_map_away(self) -> None:
-        mapping = TwoLayerMapping(_make_game_roster())
-        renames = mapping.to_column_rename_map("away")
-        assert renames["Away_7_x"] == "bilbo_lannister_x"
-        assert renames["Away_9_y"] == "samwise_baratheon_y"
-
     def test_from_roster_file(self, tmp_path: Path) -> None:
         roster = _make_game_roster()
         path = tmp_path / "roster.json"

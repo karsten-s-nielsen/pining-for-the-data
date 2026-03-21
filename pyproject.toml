@@ -28,7 +28,7 @@ dev = [
 
 [project.scripts]
 pining-generate-roster = "deidentify.roster_generator:main"
-pining-ingest = "formats.metrica:main"
+pining-ingest = "formats.skillcorner:main"
 pining-publish = "publish.hf_push:main"
 pining-upload = "mock_api.upload:main"
 
@@ -73,3 +73,8 @@ packages = ["src/deidentify", "src/formats", "src/publish", "src/mock_api"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pip-audit>=2.10.0",
+]

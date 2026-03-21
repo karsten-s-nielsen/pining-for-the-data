@@ -56,14 +56,19 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
 # --- Lambda Functions ---
 
 resource "aws_lambda_function" "list_providers" {
-  function_name    = "${var.project_name}-list-providers"
-  role             = aws_iam_role.lambda.arn
-  handler          = "list_providers.handler"
-  runtime          = "python3.12"
-  memory_size      = 128
-  timeout          = 10
-  filename         = data.archive_file.lambda_zip.output_path
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+  function_name                  = "${var.project_name}-list-providers"
+  role                           = aws_iam_role.lambda.arn
+  handler                        = "list_providers.handler"
+  runtime                        = "python3.12"
+  memory_size                    = 128
+  timeout                        = 10
+  reserved_concurrent_executions = 5
+  filename                       = data.archive_file.lambda_zip.output_path
+  source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
+
+  tracing_config {
+    mode = "Active"
+  }
 
   environment {
     variables = {
@@ -74,14 +79,19 @@ resource "aws_lambda_function" "list_providers" {
 }
 
 resource "aws_lambda_function" "list_matches" {
-  function_name    = "${var.project_name}-list-matches"
-  role             = aws_iam_role.lambda.arn
-  handler          = "list_matches.handler"
-  runtime          = "python3.12"
-  memory_size      = 128
-  timeout          = 10
-  filename         = data.archive_file.lambda_zip.output_path
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+  function_name                  = "${var.project_name}-list-matches"
+  role                           = aws_iam_role.lambda.arn
+  handler                        = "list_matches.handler"
+  runtime                        = "python3.12"
+  memory_size                    = 128
+  timeout                        = 10
+  reserved_concurrent_executions = 5
+  filename                       = data.archive_file.lambda_zip.output_path
+  source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
+
+  tracing_config {
+    mode = "Active"
+  }
 
   environment {
     variables = {
@@ -92,14 +102,19 @@ resource "aws_lambda_function" "list_matches" {
 }
 
 resource "aws_lambda_function" "get_artifact" {
-  function_name    = "${var.project_name}-get-artifact"
-  role             = aws_iam_role.lambda.arn
-  handler          = "get_artifact.handler"
-  runtime          = "python3.12"
-  memory_size      = 128
-  timeout          = 10
-  filename         = data.archive_file.lambda_zip.output_path
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+  function_name                  = "${var.project_name}-get-artifact"
+  role                           = aws_iam_role.lambda.arn
+  handler                        = "get_artifact.handler"
+  runtime                        = "python3.12"
+  memory_size                    = 128
+  timeout                        = 10
+  reserved_concurrent_executions = 5
+  filename                       = data.archive_file.lambda_zip.output_path
+  source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
+
+  tracing_config {
+    mode = "Active"
+  }
 
   environment {
     variables = {
@@ -108,4 +123,28 @@ resource "aws_lambda_function" "get_artifact" {
       PRESIGNED_EXPIRY = "3600"
     }
   }
+}
+
+# --- CloudWatch Log Groups ---
+
+resource "aws_cloudwatch_log_group" "list_providers" {
+  name              = "/aws/lambda/${aws_lambda_function.list_providers.function_name}"
+  retention_in_days = 30
+}
+
+resource "aws_cloudwatch_log_group" "list_matches" {
+  name              = "/aws/lambda/${aws_lambda_function.list_matches.function_name}"
+  retention_in_days = 30
+}
+
+resource "aws_cloudwatch_log_group" "get_artifact" {
+  name              = "/aws/lambda/${aws_lambda_function.get_artifact.function_name}"
+  retention_in_days = 30
+}
+
+# --- X-Ray Tracing ---
+
+resource "aws_iam_role_policy_attachment" "xray" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }

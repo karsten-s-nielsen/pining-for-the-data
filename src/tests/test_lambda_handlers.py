@@ -83,13 +83,13 @@ class TestListProviders(_ResetS3):
         from list_providers import handler
 
         mock_s3 = _mock_s3()
-        body = json.dumps({"providers": ["metrica", "respovision"]}).encode()
+        body = json.dumps({"providers": ["skillcorner", "respovision"]}).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         event = {"headers": {"authorization": "Bearer test-token"}}
         result = handler(event, None)
         assert result["statusCode"] == 200
-        assert "metrica" in json.loads(result["body"])["providers"]
+        assert "skillcorner" in json.loads(result["body"])["providers"]
 
     def test_rejects_no_auth(self) -> None:
         from list_providers import handler
@@ -103,12 +103,12 @@ class TestListMatches(_ResetS3):
         from list_matches import handler
 
         mock_s3 = _mock_s3()
-        body = json.dumps({"provider": "metrica", "matches": [{"id": "game_03"}]}).encode()
+        body = json.dumps({"provider": "skillcorner", "matches": [{"id": "game_03"}]}).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         event = {
             "headers": {"authorization": "Bearer test-token"},
-            "pathParameters": {"provider": "metrica"},
+            "pathParameters": {"provider": "skillcorner"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 200
@@ -134,12 +134,12 @@ class TestGetArtifact(_ResetS3):
         from get_artifact import handler
 
         mock_s3 = _mock_s3()
-        mock_s3.list_objects_v2.return_value = {"Contents": [{"Key": "metrica/game_03/tracking.txt"}]}
+        mock_s3.list_objects_v2.return_value = {"Contents": [{"Key": "skillcorner/game_03/tracking.txt"}]}
         mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
 
         event = {
             "headers": {"authorization": "Bearer test-token"},
-            "pathParameters": {"provider": "metrica", "id": "game_03", "artifact": "tracking"},
+            "pathParameters": {"provider": "skillcorner", "id": "game_03", "artifact": "tracking"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 302
@@ -153,7 +153,7 @@ class TestGetArtifact(_ResetS3):
 
         event = {
             "headers": {"authorization": "Bearer test-token"},
-            "pathParameters": {"provider": "metrica", "id": "game_99", "artifact": "tracking"},
+            "pathParameters": {"provider": "skillcorner", "id": "game_99", "artifact": "tracking"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 404
@@ -164,29 +164,29 @@ class TestGetArtifact(_ResetS3):
         mock_s3 = _mock_s3()
         mock_s3.list_objects_v2.return_value = {
             "Contents": [
-                {"Key": "metrica/game_03/tracking.txt"},
-                {"Key": "metrica/game_03/tracking_summary.json"},
+                {"Key": "skillcorner/game_03/tracking.txt"},
+                {"Key": "skillcorner/game_03/tracking_summary.json"},
             ]
         }
         mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
 
         event = {
             "headers": {"authorization": "Bearer test-token"},
-            "pathParameters": {"provider": "metrica", "id": "game_03", "artifact": "tracking"},
+            "pathParameters": {"provider": "skillcorner", "id": "game_03", "artifact": "tracking"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 302
         # Should match tracking.txt, not tracking_summary.json
         mock_s3.generate_presigned_url.assert_called_once()
         call_args = mock_s3.generate_presigned_url.call_args
-        assert call_args[1]["Params"]["Key"] == "metrica/game_03/tracking.txt"
+        assert call_args[1]["Params"]["Key"] == "skillcorner/game_03/tracking.txt"
 
     def test_missing_path_parameters(self) -> None:
         from get_artifact import handler
 
         event = {
             "headers": {"authorization": "Bearer test-token"},
-            "pathParameters": {"provider": "metrica"},
+            "pathParameters": {"provider": "skillcorner"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 400

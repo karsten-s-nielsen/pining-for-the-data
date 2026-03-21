@@ -2,6 +2,13 @@ resource "aws_apigatewayv2_api" "api" {
   name          = "${var.project_name}-api"
   protocol_type = "HTTP"
   description   = "Mock tracking data provider API"
+
+  cors_configuration {
+    allow_origins = ["*"]
+    allow_methods = ["GET"]
+    allow_headers = ["Authorization", "Content-Type"]
+    max_age       = 3600
+  }
 }
 
 resource "aws_apigatewayv2_stage" "v1" {
@@ -65,7 +72,7 @@ resource "aws_lambda_permission" "list_providers" {
   action        = "lambda:InvokeFunction"
   function_name = var.list_providers_function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/v1/GET/providers"
 }
 
 resource "aws_lambda_permission" "list_matches" {
@@ -73,7 +80,7 @@ resource "aws_lambda_permission" "list_matches" {
   action        = "lambda:InvokeFunction"
   function_name = var.list_matches_function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/v1/GET/*"
 }
 
 resource "aws_lambda_permission" "get_artifact" {
@@ -81,5 +88,5 @@ resource "aws_lambda_permission" "get_artifact" {
   action        = "lambda:InvokeFunction"
   function_name = var.get_artifact_function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/v1/GET/*"
 }

@@ -1,6 +1,6 @@
 resource "aws_kms_key" "data" {
   description             = "KMS key for ${var.project_name} data bucket"
-  deletion_window_in_days = 7
+  deletion_window_in_days = 30
   enable_key_rotation     = true
 }
 

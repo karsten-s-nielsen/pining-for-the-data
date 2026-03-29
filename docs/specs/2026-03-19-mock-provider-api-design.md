@@ -22,19 +22,17 @@ GET /v1/{provider}/matches                     → list games + available artifa
 GET /v1/{provider}/matches/{id}/{artifact}     → serve artifact (presigned S3 URL)
 ```
 
-`{provider}`: `metrica`, `respovision` (extensible)
+`{provider}`: `skillcorner`, `respovision` (extensible)
 `{artifact}`: provider-specific, e.g., `tracking`, `metadata`, `events`, `roster`, `summary`
 
 All endpoints require `Authorization: Bearer <token>`.
 
-### 2.2 Metrica Artifacts (initial)
+### 2.2 SkillCorner Artifacts (implemented)
 
 | Artifact | File | Content |
 |----------|------|---------|
-| `tracking` | `tracking.txt` | EPTS raw tracking data (colon-delimited, 0-1 normalized) |
-| `metadata` | `metadata.xml` | FIFA EPTS metadata XML (players, teams, half boundaries) |
-| `events` | `events.xml` | Tactical patterns / event annotations |
-| `roster` | `roster.json` | De-identified roster (pining-for-the-data generated, not provider artifact) |
+| `match` | `match.json` | Match metadata (teams, players, competition, pitch dimensions, periods) |
+| `tracking` | `tracking.jsonl` | Tracking data at 10fps (one JSON object per frame — ball + player positions) |
 
 ### 2.3 Respo.Vision Artifacts (future, expected)
 
@@ -51,19 +49,19 @@ Actual artifact types TBD when sample data arrives from sales engagement.
 ```json
 // GET /v1/providers
 {
-  "providers": ["metrica", "respovision"]
+  "providers": ["skillcorner", "respovision"]
 }
 
-// GET /v1/metrica/matches
+// GET /v1/skillcorner/matches
 {
-  "provider": "metrica",
+  "provider": "skillcorner",
   "matches": [
     {
       "id": "game_03",
       "date": "2026-01-03",
-      "home": "Wakanda FC",
-      "away": "Shire Town",
-      "artifacts": ["tracking", "metadata", "events", "roster"]
+      "home": "Auckland FC",
+      "away": "Wellington Phoenix FC",
+      "artifacts": ["match", "tracking"]
     }
   ]
 }
@@ -82,14 +80,12 @@ Clear upgrade path to JWT token vending (Option B) if needed later:
 
 ```
 pining-for-the-data-{account_id}/
-├── providers.json                    # ["metrica", "respovision"]
-├── metrica/
+├── providers.json                    # ["skillcorner", "respovision"]
+├── skillcorner/
 │   ├── matches.json                  # discovery index
 │   ├── game_03/
-│   │   ├── tracking.txt
-│   │   ├── metadata.xml
-│   │   ├── events.xml
-│   │   └── roster.json
+│   │   ├── match.json
+│   │   └── tracking.jsonl
 │   └── game_04/
 │       └── ...
 └── respovision/
@@ -191,8 +187,8 @@ S3 remote backend with DynamoDB locking. Bootstrap module creates the state infr
 New command: `pining-upload`
 
 ```bash
-# Upload all Metrica artifacts for a game
-pining-upload game_03/ --provider metrica --game-id game_03
+# Upload SkillCorner artifacts for a game
+pining-upload game_03/ --provider skillcorner --game-id game_03
 
 # Upload Respo.Vision artifacts (future)
 pining-upload game_03/ --provider respovision --game-id game_03
@@ -216,7 +212,7 @@ Behavior:
 5. `cp terraform.tfvars.example terraform.tfvars` and fill in values
 6. `terraform init && terraform apply`
 7. Note the API Gateway URL from outputs
-8. Upload data: `pining-upload output/game_03/ --provider metrica --game-id game_03`
+8. Upload data: `pining-upload output/game_03/ --provider skillcorner --game-id game_03`
 9. Test: `curl -H "Authorization: Bearer test-token-pining-for-the-data" https://{api-url}/v1/providers`
 
 ### For forkers

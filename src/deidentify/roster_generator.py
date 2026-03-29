@@ -51,6 +51,8 @@ OPPONENT_TEAMS: list[str] = [
 
 @dataclass
 class Player:
+    """A single player in a de-identified roster."""
+
     jersey: int
     name: str
     position: str = ""
@@ -58,12 +60,16 @@ class Player:
 
 @dataclass
 class TeamRoster:
+    """One team's roster for a game — team name and list of players."""
+
     team_name: str
     roster: list[Player] = field(default_factory=list)
 
 
 @dataclass
 class MatchMetadata:
+    """Competition metadata attached to a game roster (gender, age group, level)."""
+
     gender: str = "boys"
     age_group: str = "youth"
     level: str = "club competitive"
@@ -72,6 +78,8 @@ class MatchMetadata:
 
 @dataclass
 class GameRoster:
+    """Complete de-identified roster for a game — home team, away team, and metadata."""
+
     game_id: str
     date: str
     home: TeamRoster

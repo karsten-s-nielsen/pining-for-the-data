@@ -15,7 +15,7 @@ workspace "pining-for-the-data" "Open soccer tracking data redistribution and mo
             lambdaProviders = container "list_providers" "Returns JSON list of available tracking data providers" "AWS Lambda, Python 3.12"
             lambdaMatches = container "list_matches" "Returns JSON list of games and artifacts for a provider" "AWS Lambda, Python 3.12"
             lambdaArtifact = container "get_artifact" "Generates presigned S3 URL and returns 302 redirect" "AWS Lambda, Python 3.12"
-            dataBucket = container "Data Bucket" "Stores tracking files organized by provider/game (match JSON, tracking JSONL, events CSV, phases CSV)" "AWS S3, KMS-SSE" "Database"
+            dataBucket = container "Data Bucket" "Stores tracking files organized by provider/game (match JSON, tracking JSONL)" "AWS S3, KMS-SSE" "Database"
         }
 
         skillcorner = softwareSystem "SkillCorner Open Data" "MIT-licensed A-League tracking data (10 matches at 10fps)" "External"

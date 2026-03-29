@@ -1,5 +1,9 @@
 # Pining For The Data!
 
+[![CI](https://github.com/karsten-s-nielsen/pining-for-the-data/actions/workflows/python-ci.yml/badge.svg)](https://github.com/karsten-s-nielsen/pining-for-the-data/actions/workflows/python-ci.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 > **Customer:** 'Ello, I wish to register a complaint about this tracking dataset what I cloned not half an hour ago from this very repo.
 >
 > **Maintainer:** Oh yes, the open-source Danish Blue. What's, uh... what's wrong with it?
@@ -24,7 +28,7 @@
 
 Finding high-quality, open-source tracking data in soccer analytics is notoriously difficult. Datasets are either locked behind commercial licenses or plagued by privacy concerns regarding player identification.
 
-**pining-for-the-data** redistributes [SkillCorner open data](https://github.com/SkillCorner/opendata) (MIT license) in SkillCorner V3 format (match JSON + tracking JSONL at 10fps), with CLI tooling to validate, publish, and serve it through a mock provider API. A de-identification engine is included for future use with private/commercial tracking data from providers like [Respo.Vision](https://respo.vision/).
+**pining-for-the-data** redistributes [SkillCorner open data](https://github.com/SkillCorner/opendata) (MIT license) in SkillCorner V3 format (match metadata as JSON + frame-by-frame tracking as [JSONL](https://jsonlines.org/) at 10 frames per second), with CLI tooling to validate, publish, and serve it through a mock provider API. The project includes a de-identification engine for future use with private/commercial tracking data from providers like [Respo.Vision](https://respo.vision/).
 
 The end result is clean, highly structured, and open-source soccer tracking data published directly to [HuggingFace](https://huggingface.co/luxury-lakehouse) and served through a mock REST API. It is the companion dataset for testing and scaling analytics platforms like luxury-lakehouse.
 
@@ -35,11 +39,11 @@ The data isn't dead. It's just resting.
 ## Key Features
 
 - **De-identification Engine** &mdash; Generates synthetic rosters and manages two-layer jersey mappings. Four hand-picked character names, the rest randomly generated from fictional universes (GOT, LOTR, Breaking Bad, Princess Bride, and more).
-- **Format Handlers** &mdash; Validates and processes provider-specific tracking data (SkillCorner V3 JSON/JSONL). Respo.Vision 3D pose scaffolded for future use.
+- **Format Handlers** &mdash; Validates and processes provider-specific tracking data (SkillCorner V3 JSON/JSONL). [JSONL](https://jsonlines.org/) = one JSON object per line, one line per frame. Respo.Vision 3D pose scaffolded for future use.
 - **Automated Publication** &mdash; Pushes tracking data and dataset cards directly to the HuggingFace Hub.
 - **Mock Provider API** &mdash; AWS-backed REST API mimicking real provider download protocols, so anyone can test ingestion adapters without a commercial account.
 
-## Distribution
+## How to Access the Data
 
 | Level | What | Where | Friction |
 |-------|------|-------|----------|
@@ -65,17 +69,27 @@ Deploy your own instance in ~15 minutes: [**Setup Guide**](terraform/docs/setup.
 
 ## Quick Start
 
+After these steps you will have the project installed with all CLI tools available and the test suite passing.
+
+### Prerequisites
+
+- **Python 3.12+** &mdash; [download](https://www.python.org/downloads/)
+- **uv** (Python package manager) &mdash; [install](https://docs.astral.sh/uv/getting-started/installation/)
+- **git**
+
 ### Installation
 
 ```bash
 # Clone and install
-git clone https://github.com/karstenskyt/pining-for-the-data.git
+git clone https://github.com/karsten-s-nielsen/pining-for-the-data.git
 cd pining-for-the-data
 uv sync --extra dev
 
-# Run tests
+# Run tests — all 64 should pass
 uv run pytest
 ```
+
+> **Troubleshooting:** If `uv` is not found, install it first: `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux) or `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"` (Windows). Then restart your terminal.
 
 ### Generate a Roster
 
@@ -101,9 +115,23 @@ uv run pining-ingest match.json tracking.jsonl
 uv run pining-publish output/ --message "Add Game 03 tracking data"
 ```
 
+### Upload to Mock API
+
+```bash
+uv run pining-upload path/to/game_03/ \
+  --provider skillcorner \
+  --game-id game_03 \
+  --bucket your-bucket-name \
+  --date 2026-01-03 \
+  --home "Auckland FC" \
+  --away "Wellington Phoenix FC"
+```
+
+Requires AWS credentials and a deployed mock API instance. See [Setup Guide](terraform/docs/setup.md).
+
 ## De-identification (for future private data)
 
-SkillCorner open data is redistributed as-is — no de-identification is applied. The de-identification engine below is retained for future use with private/commercial tracking data.
+SkillCorner open data ships as-is — no de-identification applied. The de-identification engine below exists for future use with private/commercial tracking data.
 
 The home team (**Wakanda FC**) roster uses a two-layer mapping:
 
@@ -119,13 +147,17 @@ Four players have featured names that persist across all games:
 | #30 | Westley Montoya |
 | #41 | T'Challa Stark |
 
-Remaining players get randomly generated names from fictional name pools. Opponent teams are assigned from a pre-defined list of 20 fictional clubs (Asgard Athletic, Krypton City, Shire Town, etc.).
+Remaining players get randomly generated names from fictional name pools. The tool assigns opponent teams from a pre-defined list of 20 fictional clubs (Asgard Athletic, Krypton City, Shire Town, etc.).
 
 ## Architecture
 
 Open [`docs/c4/architecture.html`](docs/c4/architecture.html) in a browser to explore the C4 architecture diagrams (System Context, Container, Dynamic).
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full written architecture documentation.
+
+Additional documentation:
+- [**Tutorial**](docs/tutorial.md) &mdash; guided walkthrough of SkillCorner tracking data structure
+- [**API Reference**](docs/api-reference.md) &mdash; mock provider API endpoints, authentication, and data layout
 
 ## Project Structure
 
@@ -151,7 +183,7 @@ pining-for-the-data/
 ## Tech Stack
 
 - **Python 3.12+** with [uv](https://github.com/astral-sh/uv) for dependency management
-- **pandas + pyarrow** for data processing and Parquet output
+- **pandas + pyarrow** for data processing and [Parquet](https://parquet.apache.org/) output (columnar format, compressed, native to HuggingFace datasets)
 - **huggingface_hub** for dataset publishing (optional dependency)
 - **Terraform** for AWS mock API infrastructure
 - **ruff** for linting/formatting, **pyright** for type checking, **pytest** for testing
@@ -161,7 +193,7 @@ pining-for-the-data/
 Code: [MIT](LICENSE)
 Redistributed SkillCorner data: [MIT](NOTICE)
 
-## Related
+## See Also
 
 - luxury-lakehouse &mdash; the main analytics platform that ingests this data
 - [SkillCorner open data](https://github.com/SkillCorner/opendata) &mdash; source tracking data (MIT license)

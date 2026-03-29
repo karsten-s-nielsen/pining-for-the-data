@@ -11,6 +11,7 @@ BUCKET = os.environ.get("DATA_BUCKET", "")
 
 
 def handler(event: dict, context: object) -> dict:
+    """Return the provider index by reading ``providers.json`` from S3."""
     auth_error = validate_token(event)
     if auth_error:
         logger.warning("auth_failure", extra={"handler": "list_providers"})

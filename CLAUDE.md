@@ -1,6 +1,6 @@
 # pining-for-the-data
 
-De-identified youth soccer tracking data — open dataset and mock provider API.
+Open soccer tracking data — redistribution, validation, and mock provider API.
 Companion repo to luxury-lakehouse.
 
 ## Architecture

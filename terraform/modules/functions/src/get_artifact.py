@@ -11,6 +11,11 @@ PRESIGNED_EXPIRY = int(os.environ.get("PRESIGNED_EXPIRY", "3600"))
 
 
 def handler(event: dict, context: object) -> dict:
+    """Resolve an artifact by name and return a presigned S3 URL via 302 redirect.
+
+    Scans ``{provider}/{match_id}/{artifact}.*`` in S3 and redirects to the
+    first file whose stem matches the requested artifact name.
+    """
     auth_error = validate_token(event)
     if auth_error:
         logger.warning("auth_failure", extra={"handler": "get_artifact"})

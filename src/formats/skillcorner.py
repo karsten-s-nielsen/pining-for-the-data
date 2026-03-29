@@ -78,6 +78,7 @@ def validate_game(
 
 
 def main() -> None:
+    """CLI entry point for ``pining-ingest`` — validate a SkillCorner V3 match JSON and tracking JSONL pair."""
     parser = argparse.ArgumentParser(description="Validate SkillCorner V3 tracking data")
     parser.add_argument("match", type=Path, help="Path to match metadata JSON")
     parser.add_argument("tracking", type=Path, help="Path to tracking JSONL")

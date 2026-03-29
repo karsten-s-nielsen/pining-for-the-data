@@ -8,9 +8,8 @@
 # - Batch spatial analytics on 3D tracking data
 #
 # NOT NEEDED FOR:
-# - Metrica CSV de-identification (CPU-only, runs via uv directly)
 # - Roster generation, HF publishing
-# - Anything in Phase 1 of the project
+# - SkillCorner V3 validation and redistribution (CPU-only, runs via uv directly)
 #
 # BUILD:
 #   docker build -t pining-for-the-data .

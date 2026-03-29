@@ -168,7 +168,7 @@ What you'll customize:
 
 ### Adding a New Provider
 
-No infrastructure changes needed. Just upload files with a new provider prefix:
+No infrastructure changes needed. Upload files with a new provider prefix:
 
 ```bash
 uv run pining-upload path/to/game/ \
@@ -181,7 +181,7 @@ The Lambda handlers discover providers and artifacts dynamically from S3.
 
 ### Adding New Artifact Types
 
-Just upload files with the desired name. The `get_artifact` handler resolves
+Upload files with the desired name. The `get_artifact` handler resolves
 `{artifact}` to any file matching `{provider}/{game_id}/{artifact}.*` in S3.
 
 For example, uploading `events.json` makes it available at
@@ -212,6 +212,20 @@ terraform/
 | GET | `/v1/{provider}/matches/{id}/{artifact}` | `get_artifact` | 302 redirect to presigned S3 URL |
 
 All endpoints require `Authorization: Bearer <token>`.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `terraform init` fails with "Failed to get existing workspaces" | Backend S3 bucket doesn't exist yet | Run Step 1 (Bootstrap) first — the state module creates the bucket |
+| `terraform apply` fails with "Access Denied" | IAM permissions insufficient | Your AWS credentials need `s3:*`, `apigateway:*`, `lambda:*`, `iam:*`, `kms:*`, `dynamodb:*`, `logs:*` permissions. Use an admin role for initial setup |
+| `pining-upload` fails with "NoSuchBucket" | Bucket name mismatch | Check `terraform output bucket_name` and pass the exact value to `--bucket` |
+| `curl` returns `{"error":"Invalid token"}` or `{"error":"Missing or malformed Authorization header"}` | Wrong or missing token | Verify `Authorization: Bearer <token>` header matches `api_token` in `terraform.tfvars` |
+| `curl` returns `{"message":"Forbidden"}` | API Gateway stage mismatch | Ensure the URL ends with `/v1/...` — the stage name is part of the path |
+| `curl` returns `{"error":"Artifact not found"}` | File not uploaded or wrong artifact name | Check S3: `aws s3 ls s3://{bucket}/{provider}/{game_id}/` — artifact name must match the filename prefix (e.g., `tracking` matches `tracking.jsonl`) |
+| `terraform destroy` fails with "BucketNotEmpty" | S3 bucket still has objects | Empty it first: `aws s3 rm s3://{bucket} --recursive` |
 
 ---
 

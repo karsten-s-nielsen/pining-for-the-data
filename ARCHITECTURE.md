@@ -1,14 +1,13 @@
 # Architecture — pining-for-the-data
 
 > **Status**: SkillCorner V3 format + Mock Provider API implemented.
-> **Last Updated**: 2026-03-20
-> **Repository**: [`karstenskyt/pining-for-the-data`](https://github.com/karstenskyt/pining-for-the-data)
+> **Repository**: [`karsten-s-nielsen/pining-for-the-data`](https://github.com/karsten-s-nielsen/pining-for-the-data)
 
 ---
 
 ## 1. Purpose
 
-Tooling and infrastructure to redistribute, validate, and publish soccer tracking data as an open dataset. SkillCorner open data (MIT license) is redistributed as-is; a de-identification engine is included for future use with private/commercial data. Companion to luxury-lakehouse.
+Tooling and infrastructure to redistribute, validate, and publish soccer tracking data as an open dataset. SkillCorner open data (MIT license) is redistributed as-is; the project includes a de-identification engine for future use with private/commercial data. Companion to luxury-lakehouse.
 
 ---
 
@@ -110,7 +109,7 @@ Upload CLI (`upload.py`) for S3 data management. Lambda handlers live in `terraf
 
 ---
 
-## 4. Infrastructure (Planned)
+## 4. Infrastructure
 
 ```
 AWS (effectively $0/month at expected volume)

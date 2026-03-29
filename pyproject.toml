@@ -1,7 +1,7 @@
 [project]
 name = "pining-for-the-data"
 version = "0.1.0"
-description = "De-identified youth soccer tracking data — open dataset and mock provider API"
+description = "Open soccer tracking data — redistribution, validation, and mock provider API"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }

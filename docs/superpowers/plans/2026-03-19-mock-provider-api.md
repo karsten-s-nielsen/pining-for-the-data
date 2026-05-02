@@ -8,7 +8,7 @@
 
 **Tech Stack:** Terraform (AWS provider), Python 3.12 (Lambda + boto3), API Gateway REST, S3, KMS, DynamoDB (state lock)
 
-**Spec:** [`docs/specs/2026-03-19-mock-provider-api-design.md`](../specs/2026-03-19-mock-provider-api-design.md)
+**Spec:** [`docs/superpowers/specs/2026-03-19-mock-provider-api-design.md`](../specs/2026-03-19-mock-provider-api-design.md)
 
 **AWS access required:** Tasks 1-6 can be written and tested locally without AWS credentials. Tasks 7-8 require AWS access.
 

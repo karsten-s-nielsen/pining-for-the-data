@@ -8,11 +8,17 @@ Companion repo to luxury-lakehouse.
 - `src/deidentify/` — name pools, roster generation, two-layer jersey→identity mapping
 - `src/formats/` — provider format readers/writers (SkillCorner V3 JSON/JSONL, Respo.Vision JSON future)
 - `src/publish/` — HuggingFace Hub dataset publishing
-- `src/mock_api/` — Upload CLI for mock provider API data management
+- `src/mock_api/` — Upload CLIs (pining-upload, pining-upload-players)
 - `src/tests/` — pytest test suite
+- `schemas/` — Published JSON Schemas for `matches.json` and `players.json` (generated from Pydantic models in `terraform/modules/functions/src/shared.py`; drift-tested in CI)
+- `scripts/` — One-shot ops scripts (regenerate_schemas.py, upload_pff_wc2022.py, verify_pff_load.py)
 - `name_pools/` — JSON name lists (fictional first/last names, cities)
 - `rosters/` — generated de-identified roster JSONs per game
-- `terraform/` — AWS infrastructure (S3 + API Gateway + Lambda)
+- `terraform/` — AWS infrastructure (S3 + API Gateway + Lambda + SSM + KMS + CloudTrail)
+- `terraform/modules/functions/src/` — Lambda handlers + shared Pydantic models (canonical schema source of truth)
+- `terraform/modules/audit/` — Audit module (CloudTrail data events on data bucket)
+- `docs/decisions/` — Architecture Decision Records
+- `docs/superpowers/{specs,plans}/` — Brainstormed specs and implementation plans
 
 ## Conventions
 
@@ -40,4 +46,18 @@ The de-identification engine is retained for future use with private/commercial 
 - `pining-generate-roster` — generate a synthetic roster for a game
 - `pining-ingest` — validate SkillCorner V3 match JSON + tracking JSONL
 - `pining-publish` — push Parquet to HuggingFace Hub
-- `pining-upload` — upload game artifacts to S3 and update provider indexes
+- `pining-upload` — upload game artifacts to S3 and update provider indexes (supports `--visibility public|private`)
+- `pining-upload-players` — upload provider-level player reference catalogue (canonical JSON only)
+
+## Mock Provider API: two-tier auth
+
+The mock API serves two visibility tiers:
+
+- **Public tier**: documented `api_token` in `terraform.tfvars`. Serves redistributed open data (e.g., SkillCorner).
+- **Owner tier**: bearer token stored in SSM Parameter Store SecureString (`/pining-for-the-data/api_token_owner`). Serves restricted private-tier content (e.g., PFF). Set out-of-band via `aws ssm put-parameter`; never committed.
+
+`validate_token` (in `terraform/modules/functions/src/shared.py`) returns a `Tier` enum (`PUBLIC` or `OWNER`); handlers filter responses by tier. Tier mismatch returns uniform `404` (not `403`) to avoid existence leaks. Duplicate-token misconfiguration classifies as `PUBLIC` (fail closed).
+
+Rotation: bump `LAST_ROTATION` env var on all 5 Lambdas via `terraform apply -var=last_rotation=$(date -u +%Y%m%dT%H%M%SZ)` after `aws ssm put-parameter --overwrite`. No dual-validity in v1; consumers must implement 401 retry during the rotation window.
+
+Full design: `docs/superpowers/specs/2026-05-02-private-data-tier.md`. Architectural decisions: `docs/decisions/`.

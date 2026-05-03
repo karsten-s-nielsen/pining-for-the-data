@@ -90,3 +90,47 @@ resource "aws_lambda_permission" "get_artifact" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/v1/GET/*"
 }
+
+# --- /players resource (spec §6) ---
+
+resource "aws_apigatewayv2_integration" "list_players" {
+  api_id                 = aws_apigatewayv2_api.api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = var.list_players_invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "get_player" {
+  api_id                 = aws_apigatewayv2_api.api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = var.get_player_invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "list_players" {
+  api_id    = aws_apigatewayv2_api.api.id
+  route_key = "GET /{provider}/players"
+  target    = "integrations/${aws_apigatewayv2_integration.list_players.id}"
+}
+
+resource "aws_apigatewayv2_route" "get_player" {
+  api_id    = aws_apigatewayv2_api.api.id
+  route_key = "GET /{provider}/players/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.get_player.id}"
+}
+
+resource "aws_lambda_permission" "list_players" {
+  statement_id  = "AllowHTTPAPI"
+  action        = "lambda:InvokeFunction"
+  function_name = var.list_players_function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/v1/GET/*"
+}
+
+resource "aws_lambda_permission" "get_player" {
+  statement_id  = "AllowHTTPAPI"
+  action        = "lambda:InvokeFunction"
+  function_name = var.get_player_function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/v1/GET/*"
+}

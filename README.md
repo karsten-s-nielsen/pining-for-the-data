@@ -52,13 +52,17 @@ The data isn't dead. It's just resting.
 
 ## Mock Provider API
 
-REST API mimicking commercial tracking data providers. Same bearer token auth, same endpoint shape, same response format.
+REST API mimicking commercial tracking data providers. Bearer token auth, same endpoint shape, same response format.
 
 | Method | Path | Response |
 |--------|------|----------|
 | GET | `/v1/providers` | JSON list of supported providers |
 | GET | `/v1/{provider}/matches` | JSON list of games + available artifacts |
 | GET | `/v1/{provider}/matches/{id}/{artifact}` | 302 redirect to presigned S3 URL |
+| GET | `/v1/{provider}/players` | JSON list of player reference records |
+| GET | `/v1/{provider}/players/{id}` | Single player reference record |
+
+**Two-tier auth.** Public-tier content (the redistributed SkillCorner data) is served against the documented public token. Private-tier content (operator-loaded restricted datasets) requires a separate owner-tier token stored in AWS SSM Parameter Store. Tier semantics are uniform 404 on mismatch (no existence leaks). See [`docs/api-reference.md`](docs/api-reference.md) for the full contract; the design rationale lives in [`docs/superpowers/specs/2026-05-02-private-data-tier.md`](docs/superpowers/specs/2026-05-02-private-data-tier.md).
 
 ```bash
 TOKEN="test-token-pining-for-the-data"
@@ -85,7 +89,7 @@ git clone https://github.com/karsten-s-nielsen/pining-for-the-data.git
 cd pining-for-the-data
 uv sync --extra dev
 
-# Run tests — all 64 should pass
+# Run tests — all 125 should pass
 uv run pytest
 ```
 
@@ -167,13 +171,20 @@ pining-for-the-data/
 │   ├── deidentify/          # Roster generation, name pools, jersey mapping
 │   ├── formats/             # Provider format readers/writers (SkillCorner, Respo.Vision)
 │   ├── publish/             # HuggingFace Hub dataset publishing
-│   ├── mock_api/            # Upload CLI for mock provider API
-│   └── tests/               # pytest test suite (64 tests)
+│   ├── mock_api/            # Upload CLIs (pining-upload, pining-upload-players)
+│   └── tests/               # pytest test suite (125 tests)
 ├── name_pools/              # JSON name lists (fictional first/last names, cities)
 ├── rosters/                 # Generated de-identified rosters per game
-├── terraform/               # AWS infrastructure (S3 + API Gateway + Lambda)
+├── schemas/                 # Published JSON Schemas for matches.json + players.json
+├── scripts/                 # One-shot ops scripts (regenerate_schemas, upload_pff_wc2022, verify_pff_load)
+├── terraform/               # AWS infrastructure (S3 + API Gateway + Lambda + SSM + KMS + CloudTrail)
 ├── assets/                  # Repo logo and images
-├── docs/c4/                 # C4 architecture diagrams
+├── docs/
+│   ├── c4/                  # C4 architecture diagrams
+│   ├── decisions/           # Architecture Decision Records
+│   ├── superpowers/         # Brainstormed specs and implementation plans
+│   ├── api-reference.md     # Full mock provider API contract
+│   └── tutorial.md          # Walkthrough of SkillCorner tracking data structure
 ├── pyproject.toml           # hatch build, ruff, pyright, pytest, CLI entry points
 ├── uv.lock                  # Locked dependencies
 ├── Dockerfile               # GPU-enabled container (future)

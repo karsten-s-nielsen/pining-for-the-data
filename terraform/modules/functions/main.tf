@@ -44,6 +44,11 @@ resource "aws_iam_role_policy" "lambda_s3" {
         Action   = "kms:Decrypt"
         Resource = var.kms_key_arn
       },
+      {
+        Effect   = "Allow"
+        Action   = "ssm:GetParameter"
+        Resource = var.owner_token_param_arn
+      },
     ]
   })
 }
@@ -72,8 +77,10 @@ resource "aws_lambda_function" "list_providers" {
 
   environment {
     variables = {
-      API_TOKEN   = var.api_token
-      DATA_BUCKET = var.bucket_name
+      API_TOKEN         = var.api_token
+      DATA_BUCKET       = var.bucket_name
+      OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LAST_ROTATION     = var.last_rotation
     }
   }
 }
@@ -95,8 +102,10 @@ resource "aws_lambda_function" "list_matches" {
 
   environment {
     variables = {
-      API_TOKEN   = var.api_token
-      DATA_BUCKET = var.bucket_name
+      API_TOKEN         = var.api_token
+      DATA_BUCKET       = var.bucket_name
+      OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LAST_ROTATION     = var.last_rotation
     }
   }
 }
@@ -118,9 +127,11 @@ resource "aws_lambda_function" "get_artifact" {
 
   environment {
     variables = {
-      API_TOKEN        = var.api_token
-      DATA_BUCKET      = var.bucket_name
-      PRESIGNED_EXPIRY = "3600"
+      API_TOKEN         = var.api_token
+      DATA_BUCKET       = var.bucket_name
+      PRESIGNED_EXPIRY  = "3600"
+      OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LAST_ROTATION     = var.last_rotation
     }
   }
 }
@@ -139,6 +150,68 @@ resource "aws_cloudwatch_log_group" "list_matches" {
 
 resource "aws_cloudwatch_log_group" "get_artifact" {
   name              = "/aws/lambda/${aws_lambda_function.get_artifact.function_name}"
+  retention_in_days = 30
+}
+
+# --- New Lambdas: list_players, get_player ---
+
+resource "aws_lambda_function" "list_players" {
+  function_name                  = "${var.project_name}-list-players"
+  role                           = aws_iam_role.lambda.arn
+  handler                        = "list_players.handler"
+  runtime                        = "python3.12"
+  memory_size                    = 128
+  timeout                        = 10
+  reserved_concurrent_executions = 5
+  filename                       = data.archive_file.lambda_zip.output_path
+  source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      API_TOKEN         = var.api_token
+      DATA_BUCKET       = var.bucket_name
+      OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LAST_ROTATION     = var.last_rotation
+    }
+  }
+}
+
+resource "aws_lambda_function" "get_player" {
+  function_name                  = "${var.project_name}-get-player"
+  role                           = aws_iam_role.lambda.arn
+  handler                        = "get_player.handler"
+  runtime                        = "python3.12"
+  memory_size                    = 128
+  timeout                        = 10
+  reserved_concurrent_executions = 5
+  filename                       = data.archive_file.lambda_zip.output_path
+  source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      API_TOKEN         = var.api_token
+      DATA_BUCKET       = var.bucket_name
+      OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LAST_ROTATION     = var.last_rotation
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_group" "list_players" {
+  name              = "/aws/lambda/${aws_lambda_function.list_players.function_name}"
+  retention_in_days = 30
+}
+
+resource "aws_cloudwatch_log_group" "get_player" {
+  name              = "/aws/lambda/${aws_lambda_function.get_player.function_name}"
   retention_in_days = 30
 }
 

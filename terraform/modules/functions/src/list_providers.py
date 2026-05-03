@@ -11,11 +11,16 @@ BUCKET = os.environ.get("DATA_BUCKET", "")
 
 
 def handler(event: dict, context: object) -> dict:
-    """Return the provider index by reading ``providers.json`` from S3."""
-    auth_error = validate_token(event)
-    if auth_error:
+    """Return the provider index by reading ``providers.json`` from S3.
+
+    Tier-blind: returns the same list to both PUBLIC and OWNER tiers.
+    Existence of a provider is not the secret; the per-match visibility
+    flag is the only enforcement boundary. Spec §4.2.
+    """
+    tier = validate_token(event)
+    if isinstance(tier, dict):
         logger.warning("auth_failure", extra={"handler": "list_providers"})
-        return auth_error
+        return tier
 
     s3 = get_s3_client()
     try:

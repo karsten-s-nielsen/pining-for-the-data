@@ -24,13 +24,28 @@ module "storage" {
   project_name = var.project_name
 }
 
+resource "aws_ssm_parameter" "api_token_owner" {
+  name        = "/${var.project_name}/api_token_owner"
+  description = "Owner-tier bearer token for the mock provider API"
+  type        = "SecureString"
+  key_id      = module.storage.kms_key_arn
+  value       = "placeholder-set-via-cli-after-first-apply"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 module "functions" {
-  source       = "../../modules/functions"
-  project_name = var.project_name
-  bucket_name  = module.storage.bucket_name
-  bucket_arn   = module.storage.bucket_arn
-  kms_key_arn  = module.storage.kms_key_arn
-  api_token    = var.api_token
+  source                 = "../../modules/functions"
+  project_name           = var.project_name
+  bucket_name            = module.storage.bucket_name
+  bucket_arn             = module.storage.bucket_arn
+  kms_key_arn            = module.storage.kms_key_arn
+  api_token              = var.api_token
+  owner_token_param_arn  = aws_ssm_parameter.api_token_owner.arn
+  owner_token_param_name = aws_ssm_parameter.api_token_owner.name
+  last_rotation          = var.last_rotation
 }
 
 module "api" {
@@ -42,4 +57,15 @@ module "api" {
   list_providers_function_name = module.functions.list_providers_function_name
   list_matches_function_name   = module.functions.list_matches_function_name
   get_artifact_function_name   = module.functions.get_artifact_function_name
+  list_players_invoke_arn      = module.functions.list_players_invoke_arn
+  list_players_function_name   = module.functions.list_players_function_name
+  get_player_invoke_arn        = module.functions.get_player_invoke_arn
+  get_player_function_name     = module.functions.get_player_function_name
+}
+
+module "audit" {
+  source                  = "../../modules/audit"
+  project_name            = var.project_name
+  data_bucket_arn         = module.storage.bucket_arn
+  data_bucket_kms_key_arn = module.storage.kms_key_arn
 }

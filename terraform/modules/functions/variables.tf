@@ -23,3 +23,19 @@ variable "api_token" {
   type        = string
   sensitive   = true
 }
+
+variable "owner_token_param_arn" {
+  description = "ARN of the SSM parameter holding the owner-tier API token"
+  type        = string
+}
+
+variable "owner_token_param_name" {
+  description = "Name of the SSM parameter holding the owner-tier API token"
+  type        = string
+}
+
+variable "last_rotation" {
+  description = "No-op marker used to invalidate the warm-container _get_owner_token cache during a rotation. Bump on every owner-token rotation; spec §3.5."
+  type        = string
+  default     = "initial"
+}

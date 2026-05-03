@@ -1,0 +1,164 @@
+{
+  "$defs": {
+    "_SourceMeta": {
+      "description": "Provenance metadata for an upstream data source.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "title": "Url",
+          "type": "string"
+        },
+        "licence": {
+          "default": "",
+          "title": "Licence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "_SourceMeta",
+      "type": "object"
+    }
+  },
+  "$id": "urn:pining-for-the-data:schema:players:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Canonical shape of a single entry in `{provider}/players.json`. Spec \u00a76.3.",
+  "properties": {
+    "id": {
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "visibility": {
+      "pattern": "^(public|private)$",
+      "title": "Visibility",
+      "type": "string"
+    },
+    "updated_at": {
+      "description": "ISO 8601 UTC timestamp",
+      "title": "Updated At",
+      "type": "string"
+    },
+    "firstName": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Firstname"
+    },
+    "lastName": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lastname"
+    },
+    "nickname": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Nickname"
+    },
+    "dob": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Dob"
+    },
+    "height": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Height"
+    },
+    "position": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Position"
+    },
+    "positionGroupType": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Positiongrouptype"
+    },
+    "nationality": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Nationality"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/_SourceMeta"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "id",
+    "visibility",
+    "updated_at"
+  ],
+  "title": "PlayerRecord",
+  "type": "object"
+}

@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+# Ensure shared.py (Pydantic models) is importable.
+LAMBDA_SRC = Path(__file__).parent.parent.parent / "terraform" / "modules" / "functions" / "src"
+sys.path.insert(0, str(LAMBDA_SRC))
 
 
 class TestUploadGame:
@@ -14,12 +21,9 @@ class TestUploadGame:
 
         mock_s3 = MagicMock()
         mock_boto3.client.return_value = mock_s3
-
-        # No existing indexes
         mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
         mock_s3.get_object.side_effect = mock_s3.exceptions.NoSuchKey()
 
-        # Create test files
         (tmp_path / "tracking.txt").write_text("frame,x,y")
         (tmp_path / "metadata.xml").write_text("<xml/>")
 
@@ -35,7 +39,7 @@ class TestUploadGame:
 
         assert sorted(artifacts) == ["metadata", "tracking"]
         assert mock_s3.upload_file.call_count == 2
-        # Should have called put_object for matches.json and providers.json
+        # put_object for matches.json + providers.json
         assert mock_s3.put_object.call_count == 2
 
     @patch("mock_api.upload.boto3")
@@ -47,11 +51,18 @@ class TestUploadGame:
 
         existing_matches = {
             "provider": "skillcorner",
-            "matches": [{"id": "game_01", "artifacts": ["tracking"]}],
+            "matches": [
+                {
+                    "id": "game_01",
+                    "artifacts": {"tracking": "tracking.txt"},
+                    "visibility": "public",
+                    "updated_at": "2025-01-01T00:00:00Z",
+                }
+            ],
         }
         existing_providers = {"providers": ["skillcorner"]}
 
-        def get_object_side_effect(Bucket, Key):  # noqa: N803
+        def get_object_side_effect(Bucket, Key):
             if Key == "skillcorner/matches.json":
                 return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_matches).encode()))}
             if Key == "providers.json":
@@ -65,7 +76,7 @@ class TestUploadGame:
         artifacts = upload_game(tmp_path, "skillcorner", "game_03", "test-bucket")
 
         assert artifacts == ["tracking"]
-        # matches.json updated (put_object called), but providers.json not updated (already exists)
+        # matches.json updated; providers.json not (already exists)
         assert mock_s3.put_object.call_count == 1
 
     @patch("mock_api.upload.boto3")
@@ -74,6 +85,8 @@ class TestUploadGame:
 
         mock_s3 = MagicMock()
         mock_boto3.client.return_value = mock_s3
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        mock_s3.get_object.side_effect = mock_s3.exceptions.NoSuchKey()
 
         artifacts = upload_game(tmp_path, "skillcorner", "game_99", "test-bucket")
         assert artifacts == []
@@ -102,7 +115,7 @@ class TestUploadGame:
             provenance="redistributed",
             source_name="SkillCorner Open Data",
             source_url="https://github.com/SkillCorner/opendata",
-            source_license="MIT",
+            source_licence="MIT",
         )
 
         matches_put = next(
@@ -111,10 +124,11 @@ class TestUploadGame:
         body = json.loads(matches_put.kwargs["Body"].decode())
         game = next(m for m in body["matches"] if m["id"] == "game_01")
         assert game["provenance"] == "redistributed"
+        # British spelling for the internal field name (spec §8.2.1)
         assert game["source"] == {
             "name": "SkillCorner Open Data",
             "url": "https://github.com/SkillCorner/opendata",
-            "license": "MIT",
+            "licence": "MIT",
         }
 
     @patch("mock_api.upload.boto3")
@@ -144,6 +158,243 @@ class TestUploadGame:
         assert "source" not in game
 
 
+class TestUploadValidation:
+    def test_rejects_underscore_prefixed_provider(self):
+        from mock_api.upload import _validate_param
+
+        with pytest.raises(ValueError, match="Invalid provider"):
+            _validate_param("_private", "provider")
+
+    def test_rejects_underscore_prefixed_game_id(self):
+        from mock_api.upload import _validate_param
+
+        with pytest.raises(ValueError, match="Invalid game_id"):
+            _validate_param("_files", "game_id")
+
+    def test_accepts_underscore_midstring(self):
+        from mock_api.upload import _validate_param
+
+        _validate_param("game_03", "game_id")  # no raise
+
+
+class TestUploadVisibility:
+    @patch("mock_api.upload.boto3")
+    def test_public_visibility_writes_to_provider_root(self, mock_boto3: MagicMock, tmp_path: Path) -> None:
+        from mock_api.upload import upload_game
+
+        mock_s3 = MagicMock()
+        mock_boto3.client.return_value = mock_s3
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        mock_s3.get_object.side_effect = mock_s3.exceptions.NoSuchKey()
+
+        (tmp_path / "match.json").write_text("{}")
+
+        upload_game(tmp_path, "skillcorner", "g1", "test-bucket", visibility="public")
+
+        upload_keys = [c.args[2] for c in mock_s3.upload_file.call_args_list]
+        assert any(k == "skillcorner/g1/match.json" for k in upload_keys)
+        assert not any("_private" in k for k in upload_keys)
+
+    @patch("mock_api.upload.boto3")
+    def test_private_visibility_writes_under_private_prefix(self, mock_boto3: MagicMock, tmp_path: Path) -> None:
+        from mock_api.upload import upload_game
+
+        mock_s3 = MagicMock()
+        mock_boto3.client.return_value = mock_s3
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        mock_s3.get_object.side_effect = mock_s3.exceptions.NoSuchKey()
+
+        (tmp_path / "match.json").write_text("{}")
+        (tmp_path / "tracking.jsonl").write_text("")
+
+        upload_game(tmp_path, "pff", "m-001", "test-bucket", visibility="private")
+
+        upload_keys = [c.args[2] for c in mock_s3.upload_file.call_args_list]
+        assert any(k == "pff/_private/m-001/match.json" for k in upload_keys)
+
+        matches_put = next(c for c in mock_s3.put_object.call_args_list if c.kwargs["Key"] == "pff/matches.json")
+        body = json.loads(matches_put.kwargs["Body"].decode())
+        entry = body["matches"][0]
+        assert entry["visibility"] == "private"
+        # artifacts is an object {name: filename}, not an array
+        assert entry["artifacts"] == {"match": "match.json", "tracking": "tracking.jsonl"}
+        # updated_at is set, ISO 8601 with trailing Z
+        assert entry["updated_at"].endswith("Z")
+        assert "T" in entry["updated_at"]
+
+    @patch("mock_api.upload.boto3")
+    def test_default_visibility_is_public(self, mock_boto3: MagicMock, tmp_path: Path) -> None:
+        from mock_api.upload import upload_game
+
+        mock_s3 = MagicMock()
+        mock_boto3.client.return_value = mock_s3
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        mock_s3.get_object.side_effect = mock_s3.exceptions.NoSuchKey()
+
+        (tmp_path / "match.json").write_text("{}")
+        upload_game(tmp_path, "sc", "g1", "test-bucket")
+
+        matches_put = next(c for c in mock_s3.put_object.call_args_list if c.kwargs["Key"] == "sc/matches.json")
+        body = json.loads(matches_put.kwargs["Body"].decode())
+        assert body["matches"][0]["visibility"] == "public"
+
+    @patch("mock_api.upload.boto3")
+    def test_reupload_refreshes_updated_at_even_if_unchanged(self, mock_boto3: MagicMock, tmp_path: Path) -> None:
+        from mock_api.upload import upload_game
+
+        mock_s3 = MagicMock()
+        mock_boto3.client.return_value = mock_s3
+
+        existing = json.dumps(
+            {
+                "provider": "sc",
+                "matches": [
+                    {
+                        "id": "g1",
+                        "artifacts": {"match": "match.json"},
+                        "visibility": "public",
+                        "updated_at": "2025-01-01T00:00:00Z",
+                    }
+                ],
+            }
+        ).encode()
+        existing_providers = json.dumps({"providers": ["sc"]}).encode()
+
+        def get_obj(Bucket, Key):
+            if Key == "sc/matches.json":
+                return {"Body": MagicMock(read=MagicMock(return_value=existing))}
+            if Key == "providers.json":
+                return {"Body": MagicMock(read=MagicMock(return_value=existing_providers))}
+            raise mock_s3.exceptions.NoSuchKey()
+
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        mock_s3.get_object.side_effect = get_obj
+
+        (tmp_path / "match.json").write_text("{}")
+        upload_game(tmp_path, "sc", "g1", "test-bucket", visibility="public")
+
+        matches_put = next(c for c in mock_s3.put_object.call_args_list if c.kwargs["Key"] == "sc/matches.json")
+        body = json.loads(matches_put.kwargs["Body"].decode())
+        assert body["matches"][0]["updated_at"] != "2025-01-01T00:00:00Z"
+
+    @patch("mock_api.upload.boto3")
+    def test_tier_mixing_rejected(self, mock_boto3: MagicMock, tmp_path: Path) -> None:
+        from mock_api.upload import upload_game
+
+        mock_s3 = MagicMock()
+        mock_boto3.client.return_value = mock_s3
+
+        existing = json.dumps(
+            {
+                "provider": "sc",
+                "matches": [
+                    {
+                        "id": "g1",
+                        "artifacts": {"match": "match.json"},
+                        "visibility": "public",
+                        "updated_at": "2025-01-01T00:00:00Z",
+                    }
+                ],
+            }
+        ).encode()
+
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=existing))}
+
+        (tmp_path / "match.json").write_text("{}")
+        with pytest.raises(ValueError, match="tier"):
+            upload_game(tmp_path, "sc", "g1", "test-bucket", visibility="private")
+
+    @patch("mock_api.upload.boto3")
+    def test_pydantic_validation_runs_before_s3_index_write(self, mock_boto3: MagicMock, tmp_path: Path) -> None:
+        """Bad data must abort the index write (artifacts upload may have happened, but index never gets bad data)."""
+        from mock_api.upload import upload_game
+
+        mock_s3 = MagicMock()
+        mock_boto3.client.return_value = mock_s3
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        mock_s3.get_object.side_effect = mock_s3.exceptions.NoSuchKey()
+
+        # Filename starts with underscore — produces an artifact key starting with `_`
+        # which the MatchEntry validator rejects.
+        (tmp_path / "_secret.json").write_text("{}")
+        # And a normal artifact too so we get past the empty check
+        (tmp_path / "match.json").write_text("{}")
+
+        with pytest.raises(Exception):  # noqa: B017 — pydantic.ValidationError or similar
+            upload_game(tmp_path, "sc", "g1", "test-bucket", visibility="public")
+
+        # No matches.json put_object on the failure path
+        put_keys = [c.kwargs.get("Key") for c in mock_s3.put_object.call_args_list]
+        assert "sc/matches.json" not in put_keys
+
+
+class TestSourceLicenseAlias:
+    def test_argparse_accepts_british_spelling(self, tmp_path, monkeypatch):
+        from mock_api import upload as upload_mod
+
+        # Stub upload_game to capture kwargs without needing AWS
+        captured: dict = {}
+
+        def fake_upload(**kwargs):
+            captured.update(kwargs)
+            return []
+
+        monkeypatch.setattr(upload_mod, "upload_game", fake_upload)
+        game_dir = tmp_path / "g"
+        game_dir.mkdir()
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "pining-upload",
+                str(game_dir),
+                "--provider",
+                "sc",
+                "--game-id",
+                "g1",
+                "--bucket",
+                "b",
+                "--source-licence",
+                "British License",
+            ],
+        )
+        upload_mod.main()
+        assert captured["source_licence"] == "British License"
+
+    def test_argparse_accepts_american_alias(self, tmp_path, monkeypatch):
+        from mock_api import upload as upload_mod
+
+        captured: dict = {}
+
+        def fake_upload(**kwargs):
+            captured.update(kwargs)
+            return []
+
+        monkeypatch.setattr(upload_mod, "upload_game", fake_upload)
+        game_dir = tmp_path / "g"
+        game_dir.mkdir()
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "pining-upload",
+                str(game_dir),
+                "--provider",
+                "sc",
+                "--game-id",
+                "g1",
+                "--bucket",
+                "b",
+                "--source-license",
+                "American License",
+            ],
+        )
+        upload_mod.main()
+        # Both spellings populate the same destination (British internal name)
+        assert captured["source_licence"] == "American License"
+
+
 class TestUpdateMatchesJson:
     @patch("mock_api.upload.boto3")
     def test_replaces_existing_game_entry(self, mock_boto3: MagicMock, tmp_path: Path) -> None:
@@ -154,11 +405,18 @@ class TestUpdateMatchesJson:
 
         existing = {
             "provider": "skillcorner",
-            "matches": [{"id": "game_03", "artifacts": ["tracking"]}],
+            "matches": [
+                {
+                    "id": "game_03",
+                    "artifacts": {"tracking": "tracking.txt"},
+                    "visibility": "public",
+                    "updated_at": "2025-01-01T00:00:00Z",
+                }
+            ],
         }
         existing_providers = {"providers": ["skillcorner"]}
 
-        def get_object_side_effect(Bucket, Key):  # noqa: N803
+        def get_obj(Bucket, Key):
             if Key == "skillcorner/matches.json":
                 return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing).encode()))}
             if Key == "providers.json":
@@ -166,15 +424,13 @@ class TestUpdateMatchesJson:
             raise mock_s3.exceptions.NoSuchKey()
 
         mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
-        mock_s3.get_object.side_effect = get_object_side_effect
+        mock_s3.get_object.side_effect = get_obj
 
-        # Upload with new artifacts
         (tmp_path / "tracking.txt").write_text("data")
         (tmp_path / "roster.json").write_text("{}")
         upload_game(tmp_path, "skillcorner", "game_03", "test-bucket")
 
-        # Verify matches.json was written with updated artifacts
         put_call = mock_s3.put_object.call_args
         body = json.loads(put_call.kwargs["Body"].decode())
         game = next(m for m in body["matches"] if m["id"] == "game_03")
-        assert sorted(game["artifacts"]) == ["roster", "tracking"]
+        assert sorted(game["artifacts"].keys()) == ["roster", "tracking"]

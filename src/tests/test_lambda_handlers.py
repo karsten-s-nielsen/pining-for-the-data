@@ -8,12 +8,15 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 # Add Lambda src to path so handlers can import shared
 LAMBDA_SRC = Path(__file__).parent.parent.parent / "terraform" / "modules" / "functions" / "src"
 sys.path.insert(0, str(LAMBDA_SRC))
 
-os.environ.setdefault("API_TOKEN", "test-token")
+os.environ.setdefault("API_TOKEN", "pub-tok")
 os.environ.setdefault("DATA_BUCKET", "test-bucket")
+os.environ.setdefault("OWNER_TOKEN_PARAM", "/test/api_token_owner")
 
 import shared  # noqa: E402
 
@@ -25,71 +28,154 @@ def _mock_s3() -> MagicMock:
     return mock
 
 
-class _ResetS3:
-    """Mixin that resets the shared S3 client after each test."""
+@pytest.fixture(autouse=True)
+def _reset_module_state(monkeypatch):
+    """Reset shared module state and stub the owner-token fetcher between tests."""
+    shared._s3_client = None
+    shared._get_owner_token.cache_clear()
+    monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
+    monkeypatch.setenv("API_TOKEN", "pub-tok")
+    yield
+    shared._s3_client = None
 
-    def teardown_method(self) -> None:
-        shared._s3_client = None
+
+class _ResetS3:
+    """Mixin (kept for backward compat with subclasses; the autouse fixture handles reset)."""
+
+
+# ----- Tier enum + SSM fetcher -----
+
+
+class TestTierEnum:
+    def test_tier_values(self) -> None:
+        from shared import Tier
+
+        assert Tier.PUBLIC.value == "public"
+        assert Tier.OWNER.value == "owner"
+
+    def test_tier_is_str(self) -> None:
+        from shared import Tier
+
+        assert Tier.PUBLIC == "public"
+
+
+# ----- validate_token (new Tier-returning shape, PUBLIC on duplicate) -----
 
 
 class TestValidateToken:
-    def test_valid_token(self) -> None:
-        from shared import validate_token
+    def test_public_token(self) -> None:
+        from shared import Tier, validate_token
 
-        event = {"headers": {"authorization": "Bearer test-token"}}
-        assert validate_token(event) is None
+        event = {"headers": {"authorization": "Bearer pub-tok"}}
+        assert validate_token(event) == Tier.PUBLIC
 
-    def test_valid_token_capitalized_header(self) -> None:
-        from shared import validate_token
+    def test_owner_token(self) -> None:
+        from shared import Tier, validate_token
 
-        event = {"headers": {"Authorization": "Bearer test-token"}}
-        assert validate_token(event) is None
+        event = {"headers": {"authorization": "Bearer own-tok"}}
+        assert validate_token(event) == Tier.OWNER
+
+    def test_owner_token_capitalized_header(self) -> None:
+        from shared import Tier, validate_token
+
+        event = {"headers": {"Authorization": "Bearer own-tok"}}
+        assert validate_token(event) == Tier.OWNER
 
     def test_missing_header(self) -> None:
         from shared import validate_token
 
-        event = {"headers": {}}
-        result = validate_token(event)
-        assert result is not None
+        result = validate_token({"headers": {}})
+        assert isinstance(result, dict)
         assert result["statusCode"] == 401
 
     def test_wrong_token(self) -> None:
         from shared import validate_token
 
-        event = {"headers": {"authorization": "Bearer wrong-token"}}
-        result = validate_token(event)
-        assert result is not None
+        result = validate_token({"headers": {"authorization": "Bearer nope"}})
+        assert isinstance(result, dict)
         assert result["statusCode"] == 401
 
     def test_no_bearer_prefix(self) -> None:
         from shared import validate_token
 
-        event = {"headers": {"authorization": "Basic abc123"}}
-        result = validate_token(event)
-        assert result is not None
+        result = validate_token({"headers": {"authorization": "Basic abc"}})
+        assert isinstance(result, dict)
         assert result["statusCode"] == 401
 
     def test_null_headers(self) -> None:
         from shared import validate_token
 
-        event = {"headers": None}
-        result = validate_token(event)
-        assert result is not None
+        result = validate_token({"headers": None})
+        assert isinstance(result, dict)
         assert result["statusCode"] == 401
 
+    def test_same_public_and_owner_classifies_as_public(self, monkeypatch) -> None:
+        """Fail closed: if both tokens are the same string, classify as PUBLIC. Spec §3.2."""
+        from shared import Tier, validate_token
 
-class TestListProviders(_ResetS3):
-    def test_returns_providers(self) -> None:
+        monkeypatch.setenv("API_TOKEN", "duplicate-token")
+        monkeypatch.setattr(shared, "_get_owner_token", lambda: "duplicate-token")
+        result = validate_token({"headers": {"authorization": "Bearer duplicate-token"}})
+        assert result == Tier.PUBLIC
+
+
+# ----- Path-param validator -----
+
+
+class TestSafeParam:
+    def test_rejects_underscore_prefix(self) -> None:
+        from shared import validate_path_param
+
+        result = validate_path_param("_private", "provider")
+        assert result is not None
+        assert result["statusCode"] == 400
+
+    def test_rejects_any_underscore_prefix(self) -> None:
+        from shared import validate_path_param
+
+        for value in ["_files", "_admin", "_anything"]:
+            result = validate_path_param(value, "id")
+            assert result is not None, f"failed to reject {value!r}"
+            assert result["statusCode"] == 400
+
+    def test_accepts_underscore_midstring(self) -> None:
+        from shared import validate_path_param
+
+        assert validate_path_param("game_03", "id") is None
+
+    def test_accepts_alphanumeric(self) -> None:
+        from shared import validate_path_param
+
+        assert validate_path_param("skillcorner", "provider") is None
+        assert validate_path_param("m-001", "id") is None
+        assert validate_path_param("123", "id") is None
+
+
+# ----- list_providers (tier-blind, spec §4.2) -----
+
+
+class TestListProviders:
+    def test_public_tier_sees_pff_in_provider_list(self) -> None:
         from list_providers import handler
 
         mock_s3 = _mock_s3()
-        body = json.dumps({"providers": ["skillcorner", "respovision"]}).encode()
+        body = json.dumps({"providers": ["skillcorner", "pff"]}).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
-        event = {"headers": {"authorization": "Bearer test-token"}}
-        result = handler(event, None)
+        result = handler({"headers": {"authorization": "Bearer pub-tok"}}, None)
         assert result["statusCode"] == 200
-        assert "skillcorner" in json.loads(result["body"])["providers"]
+        assert "pff" in json.loads(result["body"])["providers"]
+
+    def test_owner_tier_sees_same_provider_list(self) -> None:
+        from list_providers import handler
+
+        mock_s3 = _mock_s3()
+        body = json.dumps({"providers": ["skillcorner", "pff"]}).encode()
+        mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
+
+        result = handler({"headers": {"authorization": "Bearer own-tok"}}, None)
+        assert result["statusCode"] == 200
+        assert json.loads(result["body"])["providers"] == ["skillcorner", "pff"]
 
     def test_rejects_no_auth(self) -> None:
         from list_providers import handler
@@ -98,21 +184,74 @@ class TestListProviders(_ResetS3):
         assert result["statusCode"] == 401
 
 
-class TestListMatches(_ResetS3):
-    def test_returns_matches(self) -> None:
+# ----- list_matches (tier filter) -----
+
+
+class TestListMatches:
+    def _payload(self):
+        return {
+            "provider": "sc",
+            "matches": [
+                {"id": "pub1", "artifacts": {"match": "match.json"}, "visibility": "public"},
+                {"id": "priv1", "artifacts": {"match": "match.json"}, "visibility": "private"},
+                {"id": "legacy", "artifacts": {"match": "match.json"}},  # missing visibility = public
+            ],
+        }
+
+    def test_public_tier_sees_public_only(self) -> None:
         from list_matches import handler
 
         mock_s3 = _mock_s3()
-        body = json.dumps({"provider": "skillcorner", "matches": [{"id": "game_03"}]}).encode()
+        body = json.dumps(self._payload()).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         event = {
-            "headers": {"authorization": "Bearer test-token"},
-            "pathParameters": {"provider": "skillcorner"},
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 200
-        assert json.loads(result["body"])["matches"][0]["id"] == "game_03"
+        ids = [m["id"] for m in json.loads(result["body"])["matches"]]
+        assert "pub1" in ids
+        assert "legacy" in ids
+        assert "priv1" not in ids
+
+    def test_owner_tier_sees_all(self) -> None:
+        from list_matches import handler
+
+        mock_s3 = _mock_s3()
+        body = json.dumps(self._payload()).encode()
+        mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
+
+        event = {
+            "headers": {"authorization": "Bearer own-tok"},
+            "pathParameters": {"provider": "sc"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        ids = [m["id"] for m in json.loads(result["body"])["matches"]]
+        assert set(ids) == {"pub1", "priv1", "legacy"}
+
+    def test_empty_after_filter_returns_200_not_404(self) -> None:
+        from list_matches import handler
+
+        mock_s3 = _mock_s3()
+        all_private = {
+            "provider": "pff",
+            "matches": [
+                {"id": "m-001", "artifacts": {"m": "m.json"}, "visibility": "private"},
+            ],
+        }
+        body = json.dumps(all_private).encode()
+        mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "pff"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        assert json.loads(result["body"])["matches"] == []
 
     def test_unknown_provider_returns_404(self) -> None:
         from list_matches import handler
@@ -122,71 +261,475 @@ class TestListMatches(_ResetS3):
         mock_s3.get_object.side_effect = mock_s3.exceptions.NoSuchKey()
 
         event = {
-            "headers": {"authorization": "Bearer test-token"},
+            "headers": {"authorization": "Bearer pub-tok"},
             "pathParameters": {"provider": "unknown"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 404
 
 
-class TestGetArtifact(_ResetS3):
-    def test_returns_redirect(self) -> None:
+# ----- get_artifact (object-form artifacts, no list_objects) -----
+
+
+class TestGetArtifact:
+    def _wire_matches(self, mock_s3, matches_payload):
+        body = json.dumps(matches_payload).encode()
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+
+        def get_obj(Bucket, Key):
+            if Key.endswith("matches.json"):
+                return {"Body": MagicMock(read=MagicMock(return_value=body))}
+            raise mock_s3.exceptions.NoSuchKey()
+
+        mock_s3.get_object.side_effect = get_obj
+        mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
+
+    def test_public_match_public_tier_returns_302(self) -> None:
         from get_artifact import handler
 
         mock_s3 = _mock_s3()
-        mock_s3.list_objects_v2.return_value = {"Contents": [{"Key": "skillcorner/game_03/tracking.txt"}]}
-        mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
+        self._wire_matches(
+            mock_s3,
+            {
+                "provider": "sc",
+                "matches": [
+                    {
+                        "id": "g1",
+                        "artifacts": {"match": "match.json"},
+                        "visibility": "public",
+                        "updated_at": "2026-05-02T14:00:00Z",
+                    },
+                ],
+            },
+        )
 
         event = {
-            "headers": {"authorization": "Bearer test-token"},
-            "pathParameters": {"provider": "skillcorner", "id": "game_03", "artifact": "tracking"},
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc", "id": "g1", "artifact": "match"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 302
-        assert result["headers"]["Location"] == "https://s3.example.com/presigned"
+        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "sc/g1/match.json"
+        mock_s3.list_objects_v2.assert_not_called()
 
-    def test_artifact_not_found(self) -> None:
+    def test_private_match_owner_tier_returns_302_with_private_prefix(self) -> None:
         from get_artifact import handler
 
         mock_s3 = _mock_s3()
-        mock_s3.list_objects_v2.return_value = {"Contents": []}
+        self._wire_matches(
+            mock_s3,
+            {
+                "provider": "pff",
+                "matches": [
+                    {
+                        "id": "m-001",
+                        "artifacts": {"metadata": "metadata.json"},
+                        "visibility": "private",
+                        "updated_at": "2026-05-02T14:00:00Z",
+                    },
+                ],
+            },
+        )
 
         event = {
-            "headers": {"authorization": "Bearer test-token"},
-            "pathParameters": {"provider": "skillcorner", "id": "game_99", "artifact": "tracking"},
+            "headers": {"authorization": "Bearer own-tok"},
+            "pathParameters": {"provider": "pff", "id": "m-001", "artifact": "metadata"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 302
+        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "pff/_private/m-001/metadata.json"
+        mock_s3.list_objects_v2.assert_not_called()
+
+    def test_private_match_public_tier_returns_404(self) -> None:
+        from get_artifact import handler
+
+        mock_s3 = _mock_s3()
+        self._wire_matches(
+            mock_s3,
+            {
+                "provider": "pff",
+                "matches": [
+                    {
+                        "id": "m-001",
+                        "artifacts": {"metadata": "metadata.json"},
+                        "visibility": "private",
+                        "updated_at": "2026-05-02T14:00:00Z",
+                    },
+                ],
+            },
+        )
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "pff", "id": "m-001", "artifact": "metadata"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 404
+        mock_s3.generate_presigned_url.assert_not_called()
+
+    def test_unknown_match_returns_404(self) -> None:
+        from get_artifact import handler
+
+        mock_s3 = _mock_s3()
+        self._wire_matches(mock_s3, {"provider": "sc", "matches": []})
+
+        event = {
+            "headers": {"authorization": "Bearer own-tok"},
+            "pathParameters": {"provider": "sc", "id": "missing", "artifact": "match"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 404
 
-    def test_filters_by_exact_artifact_name(self) -> None:
+    def test_artifact_not_in_whitelist_returns_404(self) -> None:
         from get_artifact import handler
 
         mock_s3 = _mock_s3()
-        mock_s3.list_objects_v2.return_value = {
-            "Contents": [
-                {"Key": "skillcorner/game_03/tracking.txt"},
-                {"Key": "skillcorner/game_03/tracking_summary.json"},
-            ]
-        }
-        mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
+        self._wire_matches(
+            mock_s3,
+            {
+                "provider": "sc",
+                "matches": [
+                    {
+                        "id": "g1",
+                        "artifacts": {"match": "match.json"},
+                        "visibility": "public",
+                        "updated_at": "2026-05-02T14:00:00Z",
+                    },
+                ],
+            },
+        )
 
         event = {
-            "headers": {"authorization": "Bearer test-token"},
-            "pathParameters": {"provider": "skillcorner", "id": "game_03", "artifact": "tracking"},
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc", "id": "g1", "artifact": "tracking"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 404
+        mock_s3.generate_presigned_url.assert_not_called()
+        mock_s3.list_objects_v2.assert_not_called()
+
+    def test_artifact_filename_resolves_via_object_lookup(self) -> None:
+        from get_artifact import handler
+
+        mock_s3 = _mock_s3()
+        self._wire_matches(
+            mock_s3,
+            {
+                "provider": "sc",
+                "matches": [
+                    {
+                        "id": "g1",
+                        "artifacts": {"match": "match.json", "tracking": "tracking.jsonl.bz2"},
+                        "visibility": "public",
+                        "updated_at": "2026-05-02T14:00:00Z",
+                    },
+                ],
+            },
+        )
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc", "id": "g1", "artifact": "tracking"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 302
-        # Should match tracking.txt, not tracking_summary.json
-        mock_s3.generate_presigned_url.assert_called_once()
-        call_args = mock_s3.generate_presigned_url.call_args
-        assert call_args[1]["Params"]["Key"] == "skillcorner/game_03/tracking.txt"
+        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "sc/g1/tracking.jsonl.bz2"
+        mock_s3.list_objects_v2.assert_not_called()
+
+    def test_legacy_match_without_visibility_treated_as_public(self) -> None:
+        from get_artifact import handler
+
+        mock_s3 = _mock_s3()
+        self._wire_matches(
+            mock_s3,
+            {
+                "provider": "sc",
+                "matches": [
+                    {"id": "g1", "artifacts": {"match": "match.json"}},
+                ],
+            },
+        )
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc", "id": "g1", "artifact": "match"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 302
 
     def test_missing_path_parameters(self) -> None:
         from get_artifact import handler
 
         event = {
-            "headers": {"authorization": "Bearer test-token"},
-            "pathParameters": {"provider": "skillcorner"},
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 400
+
+
+# ----- list_players + get_player (providers.json gate, private-precedence) -----
+
+
+class _PlayersWiring:
+    def _wire(self, mock_s3, providers=("sc", "pff"), public_payload=None, private_payload=None):
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        providers_body = json.dumps({"providers": list(providers)}).encode()
+
+        def get_obj(Bucket, Key):
+            if Key == "providers.json":
+                return {"Body": MagicMock(read=MagicMock(return_value=providers_body))}
+            if Key.endswith("/_private/players.json"):
+                if private_payload is None:
+                    raise mock_s3.exceptions.NoSuchKey()
+                return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(private_payload).encode()))}
+            if Key.endswith("/players.json"):
+                if public_payload is None:
+                    raise mock_s3.exceptions.NoSuchKey()
+                return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(public_payload).encode()))}
+            raise mock_s3.exceptions.NoSuchKey()
+
+        mock_s3.get_object.side_effect = get_obj
+
+
+class TestListPlayers(_PlayersWiring):
+    def test_public_tier_sees_only_public_players(self) -> None:
+        from list_players import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(
+            mock_s3,
+            public_payload={"provider": "sc", "players": [{"id": "p1", "nickname": "Pub"}]},
+            private_payload={"provider": "sc", "players": [{"id": "p2", "nickname": "Priv"}]},
+        )
+
+        event = {"headers": {"authorization": "Bearer pub-tok"}, "pathParameters": {"provider": "sc"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        assert [p["id"] for p in json.loads(result["body"])["players"]] == ["p1"]
+
+    def test_owner_tier_sees_merged_players(self) -> None:
+        from list_players import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(
+            mock_s3,
+            public_payload={"provider": "sc", "players": [{"id": "p1", "nickname": "Pub"}]},
+            private_payload={"provider": "sc", "players": [{"id": "p2", "nickname": "Priv"}]},
+        )
+
+        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        ids = sorted(p["id"] for p in json.loads(result["body"])["players"])
+        assert ids == ["p1", "p2"]
+
+    def test_no_indexes_returns_empty_list(self) -> None:
+        from list_players import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(mock_s3)
+
+        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        assert json.loads(result["body"])["players"] == []
+
+    def test_unknown_provider_returns_404(self) -> None:
+        from list_players import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(mock_s3, providers=("sc", "pff"))
+
+        event = {"headers": {"authorization": "Bearer pub-tok"}, "pathParameters": {"provider": "made-up"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 404
+
+    def test_owner_tier_cross_tier_collision_private_wins(self) -> None:
+        from list_players import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(
+            mock_s3,
+            public_payload={"provider": "sc", "players": [{"id": "p1", "nickname": "Public Mask"}]},
+            private_payload={"provider": "sc", "players": [{"id": "p1", "nickname": "Private Real"}]},
+        )
+
+        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        body = json.loads(result["body"])
+        assert len(body["players"]) == 1
+        assert body["players"][0]["nickname"] == "Private Real"
+
+
+class TestGetPlayer(_PlayersWiring):
+    def test_public_tier_can_read_public_player(self) -> None:
+        from get_player import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(mock_s3, public_payload={"provider": "sc", "players": [{"id": "p1", "nickname": "Pub"}]})
+
+        event = {"headers": {"authorization": "Bearer pub-tok"}, "pathParameters": {"provider": "sc", "id": "p1"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        assert json.loads(result["body"])["nickname"] == "Pub"
+
+    def test_public_tier_gets_404_for_private_player(self) -> None:
+        from get_player import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(
+            mock_s3,
+            public_payload={"provider": "sc", "players": []},
+            private_payload={"provider": "sc", "players": [{"id": "p2", "nickname": "Priv"}]},
+        )
+
+        event = {"headers": {"authorization": "Bearer pub-tok"}, "pathParameters": {"provider": "sc", "id": "p2"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 404
+
+    def test_owner_tier_can_read_private_player(self) -> None:
+        from get_player import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(
+            mock_s3,
+            public_payload={"provider": "sc", "players": []},
+            private_payload={"provider": "sc", "players": [{"id": "p2", "nickname": "Priv"}]},
+        )
+
+        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc", "id": "p2"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        assert json.loads(result["body"])["nickname"] == "Priv"
+
+    def test_unknown_player_returns_404(self) -> None:
+        from get_player import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(mock_s3, public_payload={"provider": "sc", "players": []})
+
+        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc", "id": "missing"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 404
+
+    def test_unknown_provider_returns_404(self) -> None:
+        from get_player import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(mock_s3, providers=("sc", "pff"))
+
+        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "made-up", "id": "p1"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 404
+
+    def test_owner_tier_cross_tier_collision_private_wins(self) -> None:
+        from get_player import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(
+            mock_s3,
+            public_payload={"provider": "sc", "players": [{"id": "p1", "nickname": "Public Mask"}]},
+            private_payload={"provider": "sc", "players": [{"id": "p1", "nickname": "Private Real"}]},
+        )
+
+        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc", "id": "p1"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        assert json.loads(result["body"])["nickname"] == "Private Real"
+
+
+# ----- Pydantic models -----
+
+
+class TestPydanticModels:
+    def test_match_entry_minimal_valid(self):
+        from shared import MatchEntry
+
+        m = MatchEntry(
+            id="m-001",
+            artifacts={"metadata": "metadata.json"},
+            visibility="private",
+            updated_at="2026-05-02T14:23:11Z",
+        )
+        assert m.id == "m-001"
+        assert m.artifacts == {"metadata": "metadata.json"}
+
+    def test_match_entry_rejects_missing_required(self):
+        from pydantic import ValidationError
+        from shared import MatchEntry
+
+        with pytest.raises(ValidationError):
+            MatchEntry(id="m-001")  # missing artifacts, visibility, updated_at
+
+    def test_match_entry_rejects_artifact_key_with_path_traversal(self):
+        from pydantic import ValidationError
+        from shared import MatchEntry
+
+        with pytest.raises(ValidationError, match="artifact name"):
+            MatchEntry(
+                id="m-001",
+                artifacts={"../etc/passwd": "evil.txt"},
+                visibility="public",
+                updated_at="2026-05-02T14:23:11Z",
+            )
+
+    def test_match_entry_rejects_artifact_key_with_leading_underscore(self):
+        from pydantic import ValidationError
+        from shared import MatchEntry
+
+        with pytest.raises(ValidationError, match="artifact name"):
+            MatchEntry(
+                id="m-001",
+                artifacts={"_private": "secret.json"},
+                visibility="public",
+                updated_at="2026-05-02T14:23:11Z",
+            )
+
+    def test_player_record_requires_id(self):
+        from pydantic import ValidationError
+        from shared import PlayerRecord
+
+        with pytest.raises(ValidationError):
+            PlayerRecord(nickname="No ID", visibility="public", updated_at="2026-05-02T14:23:11Z")
+
+    def test_player_record_requires_a_name(self):
+        from pydantic import ValidationError
+        from shared import PlayerRecord
+
+        with pytest.raises(ValidationError):
+            PlayerRecord(id="x", visibility="public", updated_at="2026-05-02T14:23:11Z")
+
+    def test_player_record_accepts_nickname_only(self):
+        from shared import PlayerRecord
+
+        p = PlayerRecord(id="x", nickname="Pelé", visibility="public", updated_at="2026-05-02T14:23:11Z")
+        assert p.nickname == "Pelé"
+
+    def test_player_record_accepts_firstname_lastname(self):
+        from shared import PlayerRecord
+
+        p = PlayerRecord(
+            id="x",
+            firstName="Test",
+            lastName="Player",
+            visibility="private",
+            updated_at="2026-05-02T14:23:11Z",
+        )
+        assert p.firstName == "Test"
+
+    def test_player_record_round_trips_unknown_fields(self):
+        from shared import PlayerRecord
+
+        p = PlayerRecord.model_validate(
+            {
+                "id": "x",
+                "nickname": "Test",
+                "visibility": "public",
+                "updated_at": "2026-05-02T14:23:11Z",
+                "providerSpecificField": 42,
+            }
+        )
+        dumped = p.model_dump()
+        assert dumped["providerSpecificField"] == 42

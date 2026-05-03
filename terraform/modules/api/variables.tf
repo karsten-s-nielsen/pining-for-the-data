@@ -32,3 +32,23 @@ variable "get_artifact_function_name" {
   description = "Function name for get_artifact Lambda"
   type        = string
 }
+
+variable "list_players_invoke_arn" {
+  description = "Invoke ARN for the list_players Lambda"
+  type        = string
+}
+
+variable "list_players_function_name" {
+  description = "Function name for the list_players Lambda"
+  type        = string
+}
+
+variable "get_player_invoke_arn" {
+  description = "Invoke ARN for the get_player Lambda"
+  type        = string
+}
+
+variable "get_player_function_name" {
+  description = "Function name for the get_player Lambda"
+  type        = string
+}

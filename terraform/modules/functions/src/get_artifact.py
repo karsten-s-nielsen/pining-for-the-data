@@ -67,37 +67,19 @@ def handler(event: dict, context: object) -> dict:
         return json_response(404, {"error": "Match not found"})
 
     # Spec §4.3: artifacts is an object {name: filename}; keys form the whitelist,
-    # values resolve the file. Legacy entries (uploaded before Task 8) have an
-    # array of names instead — fall back to per-request S3 list for those, until
-    # they're re-uploaded into the object form. This keeps existing public data
-    # serving without forcing a one-shot migration.
+    # values resolve the file. The pre-Task-8 array form was migrated out of
+    # production by scripts/backfill_skillcorner_artifacts.py — entries without
+    # a dict here are treated as malformed (404).
     artifacts = match.get("artifacts")
-    prefix_root = f"{provider}/_private/{match_id}" if visibility == "private" else f"{provider}/{match_id}"
-
-    if isinstance(artifacts, dict):
-        filename = artifacts.get(artifact)
-        if filename is None:
-            return json_response(404, {"error": "Artifact not found"})
-        key = f"{prefix_root}/{filename}"
-    elif isinstance(artifacts, list):
-        # Legacy array form: name must be in the list, then S3-list to find the file
-        if artifact not in artifacts:
-            return json_response(404, {"error": "Artifact not found"})
-        try:
-            response = s3.list_objects_v2(Bucket=BUCKET, Prefix=f"{prefix_root}/{artifact}", MaxKeys=5)
-            matching = [
-                obj["Key"]
-                for obj in response.get("Contents", [])
-                if obj["Key"].rsplit("/", 1)[-1].rsplit(".", 1)[0] == artifact
-            ]
-            if not matching:
-                return json_response(404, {"error": "Artifact not found"})
-            key = matching[0]
-        except Exception:
-            logger.exception("s3_error", extra={"handler": "get_artifact", "stage": "legacy_list"})
-            return json_response(500, {"error": "Internal server error"})
-    else:
+    if not isinstance(artifacts, dict):
         return json_response(404, {"error": "Artifact not found"})
+
+    filename = artifacts.get(artifact)
+    if filename is None:
+        return json_response(404, {"error": "Artifact not found"})
+
+    prefix_root = f"{provider}/_private/{match_id}" if visibility == "private" else f"{provider}/{match_id}"
+    key = f"{prefix_root}/{filename}"
 
     try:
         url = s3.generate_presigned_url(

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+- `get_artifact` legacy array-form fallback (and its 2 regression tests). All deployed `matches.json` entries are now in canonical object form, so the dead code path is gone.
+
+### Migrated
+- 10 SkillCorner matches in `skillcorner/matches.json` migrated from legacy array-form `artifacts: ["..."]` to canonical object-form `artifacts: {name: filename}`, `visibility: "public"` and `updated_at` added, `source.license` (American) renamed to `source.licence` (British, per spec §8.2.1). One-shot script `scripts/backfill_skillcorner_artifacts.py` is idempotent and uses S3 `IfMatch=<etag>` for optimistic concurrency control.
+
 ### Added
 - Two-tier auth on the mock provider API: PUBLIC tier (existing `api_token`) and OWNER tier (SSM Parameter Store SecureString). `validate_token` returns a `Tier` enum; tier mismatch returns uniform `404` to avoid existence leaks (no 403). Duplicate-token misconfiguration classifies as PUBLIC (fail closed).
 - Match-level visibility flag (`public` / `private`) with reserved `_private/` S3 prefix for tier separation (defense in depth alongside the application-layer tier check).

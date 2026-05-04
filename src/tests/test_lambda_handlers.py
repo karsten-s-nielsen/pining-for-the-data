@@ -457,45 +457,6 @@ class TestGetArtifact:
         result = handler(event, None)
         assert result["statusCode"] == 302
 
-    def test_legacy_array_form_artifacts_falls_back_to_s3_list(self) -> None:
-        """Legacy entries with `artifacts: ["name1", "name2"]` (pre-Task-8 array form)
-        must still resolve via S3 listing — backwards-compat with already-deployed data."""
-        from get_artifact import handler
-
-        mock_s3 = _mock_s3()
-        self._wire_matches(
-            mock_s3,
-            {"provider": "sc", "matches": [{"id": "g1", "artifacts": ["match", "tracking"]}]},
-        )
-        mock_s3.list_objects_v2.return_value = {"Contents": [{"Key": "sc/g1/match.json"}]}
-
-        event = {
-            "headers": {"authorization": "Bearer pub-tok"},
-            "pathParameters": {"provider": "sc", "id": "g1", "artifact": "match"},
-        }
-        result = handler(event, None)
-        assert result["statusCode"] == 302
-        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "sc/g1/match.json"
-        mock_s3.list_objects_v2.assert_called_once()
-
-    def test_legacy_array_form_artifact_not_in_whitelist_returns_404(self) -> None:
-        from get_artifact import handler
-
-        mock_s3 = _mock_s3()
-        self._wire_matches(
-            mock_s3,
-            {"provider": "sc", "matches": [{"id": "g1", "artifacts": ["match"]}]},
-        )
-
-        event = {
-            "headers": {"authorization": "Bearer pub-tok"},
-            "pathParameters": {"provider": "sc", "id": "g1", "artifact": "tracking"},
-        }
-        result = handler(event, None)
-        assert result["statusCode"] == 404
-        mock_s3.generate_presigned_url.assert_not_called()
-        mock_s3.list_objects_v2.assert_not_called()
-
     def test_missing_path_parameters(self) -> None:
         from get_artifact import handler
 

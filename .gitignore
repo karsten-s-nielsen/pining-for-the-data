@@ -55,3 +55,6 @@ Thumbs.db
 *.mp4
 *.mov
 *.avi
+
+# Terraform plan binaries (operator-local; not to be committed)
+*.tfplan

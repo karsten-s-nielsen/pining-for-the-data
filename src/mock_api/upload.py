@@ -10,17 +10,32 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 import boto3
 
-_SAFE_PARAM = re.compile(r"^[a-zA-Z0-9_-]+$")
+from canonical.models import MatchEntry
+
+# Same rule as the API-side validator: no leading underscore (reserved namespace).
+_SAFE_PARAM = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 
 
 def _validate_param(value: str, name: str) -> None:
-    """Raise ValueError if param contains unsafe characters."""
-    if not value or not _SAFE_PARAM.match(value) or len(value) > 128:
-        raise ValueError(f"Invalid {name}: must be 1-128 alphanumeric/dash/underscore characters")
+    """Raise ValueError if param is empty, too long, or contains unsafe characters.
+
+    Leading underscore is rejected — reserved for internal namespace markers (`_private`).
+    """
+    if not value or len(value) > 128 or not _SAFE_PARAM.match(value):
+        raise ValueError(
+            f"Invalid {name}: must be 1-128 characters, start with alphanumeric, "
+            f"and contain only alphanumeric, hyphens, or underscores"
+        )
+
+
+def _utc_now_iso() -> str:
+    """Current UTC time, ISO 8601 with trailing Z (no microseconds)."""
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def upload_game(
@@ -28,13 +43,14 @@ def upload_game(
     provider: str,
     game_id: str,
     bucket: str,
+    visibility: str = "public",
     date: str | None = None,
     home: str | None = None,
     away: str | None = None,
     provenance: str | None = None,
     source_name: str | None = None,
     source_url: str | None = None,
-    source_license: str | None = None,
+    source_licence: str | None = None,
 ) -> list[str]:
     """Upload all files in game_dir to S3 and update indexes.
 
@@ -48,6 +64,10 @@ def upload_game(
         Game identifier (e.g., "game_03").
     bucket : str
         S3 bucket name.
+    visibility : str
+        ``"public"`` (default) or ``"private"``. Private content is written under
+        ``{provider}/_private/{game_id}/...`` and recorded with
+        ``visibility: "private"`` in matches.json.
     date : str | None
         Game date for the matches index (YYYY-MM-DD).
     home : str | None
@@ -60,57 +80,127 @@ def upload_game(
         Name of the original data source.
     source_url : str | None
         URL of the original data source.
-    source_license : str | None
-        License of the original data source.
+    source_licence : str | None
+        Licence of the original data source. British spelling canonical;
+        ``--source-license`` is accepted as a quiet alias by the argparse layer
+        (see ``main()``) and forwarded into this parameter.
 
     Returns
     -------
     list[str]
         List of uploaded artifact names.
     """
+    if visibility not in ("public", "private"):
+        raise ValueError(f"Invalid visibility: {visibility!r} (must be 'public' or 'private')")
+
     _validate_param(provider, "provider")
     _validate_param(game_id, "game_id")
 
     s3 = boto3.client("s3")
 
-    # Upload all files in the directory
-    artifacts: list[str] = []
+    # Reject tier mixing: a re-upload cannot flip an existing match's tier.
+    _check_no_tier_mixing(s3, bucket, provider, game_id, visibility)
+
+    prefix = f"{provider}/_private/{game_id}" if visibility == "private" else f"{provider}/{game_id}"
+
+    # Build artifacts as {name: filename} object form (spec §4.1).
+    artifacts: dict[str, str] = {}
     for file_path in sorted(game_dir.iterdir()):
         if file_path.is_file() and not file_path.name.startswith("."):
-            key = f"{provider}/{game_id}/{file_path.name}"
+            key = f"{prefix}/{file_path.name}"
             s3.upload_file(str(file_path), bucket, key)
-            artifact_name = file_path.stem
-            artifacts.append(artifact_name)
+            # Strip ALL extensions so tracking.jsonl.bz2 -> tracking.
+            artifact_name = file_path.name.split(".", 1)[0]
+            artifacts[artifact_name] = file_path.name
             print(f"  Uploaded {file_path.name} -> s3://{bucket}/{key}")
 
     if not artifacts:
         print(f"  No files found in {game_dir}")
-        return artifacts
+        return list(artifacts)
 
-    # Update indexes
-    _update_matches_json(
-        s3, bucket, provider, game_id, artifacts, date, home, away, provenance, source_name, source_url, source_license
+    # Build and validate the canonical entry BEFORE any S3 index write.
+    entry = _build_match_entry(
+        game_id,
+        artifacts,
+        visibility,
+        date,
+        home,
+        away,
+        provenance,
+        source_name,
+        source_url,
+        source_licence,
     )
+    _update_matches_json(s3, bucket, provider, entry)
     _update_providers_json(s3, bucket, provider)
 
-    return artifacts
+    return list(artifacts)
 
 
-def _update_matches_json(
-    s3,
-    bucket: str,
-    provider: str,
+def _build_match_entry(
     game_id: str,
-    artifacts: list[str],
+    artifacts: dict[str, str],
+    visibility: str,
     date: str | None,
     home: str | None,
     away: str | None,
-    provenance: str | None = None,
-    source_name: str | None = None,
-    source_url: str | None = None,
-    source_license: str | None = None,
-) -> None:
-    """Read-modify-write the matches.json index for a provider."""
+    provenance: str | None,
+    source_name: str | None,
+    source_url: str | None,
+    source_licence: str | None,
+) -> dict:
+    """Assemble and Pydantic-validate a MatchEntry. Raises on validation error."""
+    payload: dict = {
+        "id": game_id,
+        "artifacts": artifacts,
+        "visibility": visibility,
+        "updated_at": _utc_now_iso(),
+    }
+    if date:
+        payload["date"] = date
+    if home:
+        payload["home"] = home
+    if away:
+        payload["away"] = away
+    if provenance:
+        payload["provenance"] = provenance
+    if source_name:
+        payload["source"] = {
+            "name": source_name,
+            "url": source_url or "",
+            "licence": source_licence or "",
+        }
+    # Validation will raise pydantic.ValidationError before any S3 write.
+    return MatchEntry.model_validate(payload).model_dump(exclude_none=True)
+
+
+def _check_no_tier_mixing(s3, bucket: str, provider: str, game_id: str, new_visibility: str) -> None:
+    """Raise ValueError if `game_id` exists in matches.json with a different tier."""
+    key = f"{provider}/matches.json"
+    try:
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        data = json.loads(obj["Body"].read().decode("utf-8"))
+    except s3.exceptions.NoSuchKey:
+        return  # No existing index — nothing to conflict with.
+
+    existing = next((m for m in data.get("matches", []) if m.get("id") == game_id), None)
+    if existing is None:
+        return
+    existing_visibility = existing.get("visibility", "public")
+    if existing_visibility != new_visibility:
+        raise ValueError(
+            f"Cannot mix tiers for game_id {game_id!r}: existing entry is "
+            f"{existing_visibility!r}, requested {new_visibility!r}. "
+            f"Re-tiering requires an explicit move (manual procedure documented in spec §11.4; "
+            f"not supported by tooling in v1)."
+        )
+
+
+def _update_matches_json(s3, bucket: str, provider: str, entry: dict) -> None:
+    """Read-modify-write the matches.json index for a provider.
+
+    `entry` MUST already be a validated MatchEntry dict (see _build_match_entry).
+    """
     key = f"{provider}/matches.json"
 
     try:
@@ -119,27 +209,8 @@ def _update_matches_json(
     except s3.exceptions.NoSuchKey:
         data = {"provider": provider, "matches": []}
 
-    # Find existing entry or create new one
+    game_id = entry["id"]
     existing = next((m for m in data["matches"] if m["id"] == game_id), None)
-    entry = {
-        "id": game_id,
-        "artifacts": artifacts,
-    }
-    if date:
-        entry["date"] = date
-    if home:
-        entry["home"] = home
-    if away:
-        entry["away"] = away
-    if provenance:
-        entry["provenance"] = provenance
-    if source_name:
-        entry["source"] = {
-            "name": source_name,
-            "url": source_url or "",
-            "license": source_license or "",
-        }
-
     if existing:
         idx = data["matches"].index(existing)
         data["matches"][idx] = entry
@@ -186,6 +257,12 @@ def main() -> None:
     parser.add_argument("--provider", required=True, help="Provider name (e.g., skillcorner)")
     parser.add_argument("--game-id", required=True, help="Game identifier (e.g., game_03)")
     parser.add_argument("--bucket", required=True, help="S3 bucket name")
+    parser.add_argument(
+        "--visibility",
+        default="public",
+        choices=["public", "private"],
+        help="Visibility tier (default: public; private writes under _private/ prefix)",
+    )
     parser.add_argument("--date", default=None, help="Game date (YYYY-MM-DD)")
     parser.add_argument("--home", default=None, help="Home team name")
     parser.add_argument("--away", default=None, help="Away team name")
@@ -197,24 +274,33 @@ def main() -> None:
     )
     parser.add_argument("--source-name", default=None, help="Name of the original data source")
     parser.add_argument("--source-url", default=None, help="URL of the original data source")
-    parser.add_argument("--source-license", default=None, help="License of the original data source")
+    # Both spellings populate `source_licence`. British is canonical; American
+    # is a quiet alias (no deprecation warning). Spec §8.2.1.
+    parser.add_argument(
+        "--source-licence",
+        "--source-license",
+        dest="source_licence",
+        default=None,
+        help="Source licence text (British spelling canonical; --source-license also accepted)",
+    )
     args = parser.parse_args()
 
     if not args.game_dir.is_dir():
         parser.error(f"Not a directory: {args.game_dir}")
 
-    print(f"Uploading {args.game_id} ({args.provider}) to s3://{args.bucket}/")
+    print(f"Uploading {args.game_id} ({args.provider}, {args.visibility}) to s3://{args.bucket}/")
     artifacts = upload_game(
         game_dir=args.game_dir,
         provider=args.provider,
         game_id=args.game_id,
         bucket=args.bucket,
+        visibility=args.visibility,
         date=args.date,
         home=args.home,
         away=args.away,
         provenance=args.provenance,
         source_name=args.source_name,
         source_url=args.source_url,
-        source_license=args.source_license,
+        source_licence=args.source_licence,
     )
     print(f"Done — {len(artifacts)} artifact(s) uploaded.")

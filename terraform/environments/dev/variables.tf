@@ -15,3 +15,9 @@ variable "api_token" {
   type        = string
   sensitive   = true
 }
+
+variable "last_rotation" {
+  description = "No-op marker bumped during owner-token rotation to invalidate Lambda warm-container cache (spec §3.5)"
+  type        = string
+  default     = "initial"
+}

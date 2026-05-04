@@ -99,13 +99,27 @@ Read and validate provider-specific tracking data.
 
 ### 3.4 Mock API (`src/mock_api/`)
 
-Upload CLI (`upload.py`) for S3 data management. Lambda handlers live in `terraform/modules/functions/src/`.
+Upload CLIs (`upload.py`, `upload_players.py`) for S3 data management. Lambda handlers live in `terraform/modules/functions/src/`. Canonical Pydantic models (`MatchEntry`, `PlayerRecord`) in `shared.py` are the single source of truth for the index shapes; JSON Schemas in `schemas/` are generated from them and drift-tested.
 
 | Endpoint | Handler | Purpose |
 |----------|---------|---------|
-| `GET /v1/providers` | `list_providers` | List supported tracking data providers |
-| `GET /v1/{provider}/matches` | `list_matches` | List available games + artifacts for a provider |
-| `GET /v1/{provider}/matches/{id}/{artifact}` | `get_artifact` | Serve artifact via presigned S3 URL (302 redirect) |
+| `GET /v1/providers` | `list_providers` | List supported tracking data providers (tier-blind) |
+| `GET /v1/{provider}/matches` | `list_matches` | List games + object-form `artifacts: {name: filename}` for a provider, filtered by tier |
+| `GET /v1/{provider}/matches/{id}/{artifact}` | `get_artifact` | Resolve artifact filename via dict lookup, serve via presigned S3 URL (302 redirect) |
+| `GET /v1/{provider}/players` | `list_players` | List player reference records for a provider (provider-gated 404, tier-merged) |
+| `GET /v1/{provider}/players/{id}` | `get_player` | Single player reference record (private-wins precedence on cross-tier collision) |
+
+### 3.5 Two-tier auth + private content
+
+`validate_token` returns a `Tier` enum:
+
+- **`Tier.PUBLIC`** — bearer matches the documented `api_token` in `terraform.tfvars`. Sees only entries with `visibility == "public"` (or missing, treated as public).
+- **`Tier.OWNER`** — bearer matches the SSM Parameter Store SecureString `/pining-for-the-data/api_token_owner` (encrypted with the data bucket's KMS key). Sees all entries.
+- **Duplicate-token misconfiguration** — classified as `Tier.PUBLIC` (fail closed; ADR 0001).
+
+Tier mismatch returns uniform `404` (not `403`) to avoid existence leaks. Private-tier content lives under a reserved `_private/` S3 prefix (ADR 0002): `{bucket}/{provider}/_private/{game_id}/...` for matches, `{bucket}/{provider}/_private/players.json` for the players index. Path-param validators reject `_`-prefixed values, making `_private` an unreachable input from API callers.
+
+The owner-token cache (`functools.cache`-decorated) is invalidated during rotation by bumping a no-op `LAST_ROTATION` env var on all 5 Lambdas via `terraform apply -var=last_rotation=...` (spec §3.5). No dual-validity in v1: consumers must implement 401 retry during the rotation window.
 
 ---
 
@@ -113,14 +127,19 @@ Upload CLI (`upload.py`) for S3 data management. Lambda handlers live in `terraf
 
 ```
 AWS (effectively $0/month at expected volume)
-├── S3 bucket
-│   ├── private prefix  →  source-of-truth JSON/JSONL (versioned)
-│   └── public prefix   →  served via presigned URLs
-├── API Gateway          →  REST endpoints mimicking provider protocol
-└── Lambda               →  auth check + S3 presigned URL generation
+├── S3 data bucket           →  Tracking files; versioned; SSE-KMS
+│   ├── {provider}/...       →  Public-tier content (presigned to anyone with public token)
+│   └── {provider}/_private/ →  Private-tier content (presigned only to owner-token holders)
+├── S3 audit bucket          →  CloudTrail data events; 365-day retention; SSE-KMS
+├── KMS CMK                  →  Encrypts both buckets; rotated annually
+├── SSM Parameter Store      →  /pining-for-the-data/api_token_owner (SecureString)
+├── CloudTrail               →  Data events on data bucket; excludes only providers.json reads
+├── API Gateway (HTTP API)   →  REST endpoints mimicking provider protocol; throttled (10rps/50burst)
+└── Lambda x5                →  list_providers, list_matches, get_artifact, list_players, get_player
+                                 (auth check via Tier enum + SSM owner-token fetch + S3 presigned URL gen)
 ```
 
-Terraform modules in `terraform/`. See [setup guide](terraform/docs/setup.md).
+Terraform modules in `terraform/`. Audit logging is provisioned via `terraform/modules/audit/`. See [setup guide](terraform/docs/setup.md) and [ADR 0001-0005](docs/decisions/) for design rationale.
 
 ---
 

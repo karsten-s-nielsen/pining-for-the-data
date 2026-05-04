@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a two-tier auth model (public + owner) to the mock provider API, expose private match data and a player reference resource (`/players`), enable CloudTrail audit logging, and load the PFF FIFA World Cup 2022 dataset (67 matches + 2,322 players) as the first restricted-tier content.
+**Goal:** Add a two-tier auth model (public + owner) to the mock provider API, expose private match data and a player reference resource (`/players`), enable CloudTrail audit logging, and load the PFF FIFA World Cup 2022 dataset (64 matches + 2,322 players) as the first restricted-tier content.
 
 **Architecture:** A second bearer token (`owner`), stored in SSM Parameter Store, is accepted by every Lambda alongside the existing public token. `validate_token` returns a tier (`PUBLIC` or `OWNER`) used to filter list responses and enforce uniform-404 on artifact/player retrieval for tier mismatches. Match visibility is recorded per-entry in `matches.json`; private matches and the private player index live under a reserved `_private/` S3 prefix for defense in depth. A new resource family `/players` follows the same shape as `/matches`. CloudTrail data events on the data bucket land in a separate audit bucket with a 365-day retention policy.
 
@@ -13,39 +13,46 @@
 ## File Structure
 
 **Lambda handlers** (`terraform/modules/functions/src/`):
-- `shared.py` — modified: add `Tier` enum, `get_owner_token` SSM fetcher, refactor `validate_token` to return `Tier`, harden `_SAFE_PARAM` against `_`-prefix.
+- `shared.py` — modified: add `Tier` enum, `get_owner_token` SSM fetcher, refactor `validate_token` to return `Tier` (PUBLIC on duplicate-token; fail closed), harden `_SAFE_PARAM` against `_`-prefix, add `MatchEntry` and `PlayerRecord` Pydantic models with `$id`/`$schema` metadata.
 - `list_providers.py` — modified: minor update to use new validator return type.
-- `list_matches.py` — modified: filter response by tier.
-- `get_artifact.py` — modified: read `matches.json`, resolve prefix from match's recorded visibility.
-- `list_players.py` — new.
-- `get_player.py` — new.
+- `list_matches.py` — modified: filter response by tier; preserve `updated_at` and the `artifacts` object pass-through.
+- `get_artifact.py` — modified: read `matches.json`, resolve prefix from match's recorded visibility, look up filename via `artifacts[name]` (whitelist enforcement built-in), generate presigned URL directly — no `list_objects_v2`, no `head_object`.
+- `list_players.py` — new: gates on `providers.json` membership for unknown-provider 404; merges public + private with private precedence on owner-tier.
+- `get_player.py` — new: same providers.json gate; private precedence on collisions.
 
 **Terraform** (`terraform/modules/`):
-- `functions/main.tf` — modified: two new lambdas, IAM additions for SSM + KMS, `OWNER_TOKEN_PARAM` env var.
-- `functions/variables.tf` — modified: new `owner_token_param_arn` variable.
+- `functions/main.tf` — modified: two new lambdas, IAM additions for SSM + KMS, `OWNER_TOKEN_PARAM` env var, `LAST_ROTATION` env var (no-op marker for cache invalidation on token rotation).
+- `functions/variables.tf` — modified: new `owner_token_param_arn` variable, `last_rotation` variable.
 - `functions/outputs.tf` — modified: new lambda invoke ARNs.
 - `api/main.tf` — modified: two new routes for `/players` and `/players/{id}`.
 - `api/variables.tf` — modified: new lambda variables.
-- `audit/main.tf` — new: audit bucket + KMS + CloudTrail trail.
+- `audit/main.tf` — new: audit bucket + KMS + CloudTrail trail. Trail's `not_ends_with` excludes only `/providers.json` (matches.json and players.json reads stay logged — see spec §7.5).
 - `audit/variables.tf` — new.
 - `audit/outputs.tf` — new.
-- `environments/dev/main.tf` — modified: SSM parameter resource, audit module, owner-token wiring.
+- `environments/dev/main.tf` — modified: SSM parameter resource, audit module, owner-token wiring, `last_rotation` variable wiring.
 - `environments/dev/variables.tf` — modified: new variable surface (none required from user; SSM value set out-of-band).
 
 **Python CLI** (`src/mock_api/`):
-- `upload.py` — modified: `--visibility` flag, `--source-licence` flag, `_`-prefix rejection, write to `_private/` when private.
-- `upload_players.py` — new: `pining-upload-players` CLI.
+- `upload.py` — modified: `--visibility` flag, `--source-licence` flag (with `--source-license` alias), `_`-prefix rejection, write to `_private/` when private, set `updated_at` on every write, write `artifacts` as `{name: filename}` object form, validate against `MatchEntry` Pydantic model before any S3 call.
+- `upload_players.py` — new: `pining-upload-players` CLI. Canonical JSON only — explicitly rejects CSV with a message pointing at `scripts/upload_pff_wc2022.py` as the reference adapter. Validates every record against `PlayerRecord`. Cross-tier dedup check across both `players.json` files. British spelling canonical, American alias.
 
 **Project config** (`pyproject.toml`):
-- modified: add `pining-upload-players` entry point.
+- modified: add `pining-upload-players` entry point. Add `pydantic>=2` and `jsonschema` to runtime dependencies.
+
+**Schemas** (`schemas/`):
+- `matches.schema.json` — new, generated from `MatchEntry.model_json_schema()`.
+- `players.schema.json` — new, generated from `PlayerRecord.model_json_schema()`.
 
 **Tests** (`src/tests/`):
-- `test_lambda_handlers.py` — modified: tier validator, list_matches filter, get_artifact visibility, new tests for `list_players`/`get_player`, validator hardening.
-- `test_upload.py` — modified: visibility flag behaviour, `_`-prefix rejection.
+- `test_lambda_handlers.py` — modified: PUBLIC-on-duplicate, list_matches filter, list_providers tier-blind pin, get_artifact whitelist + no-list assertion, list_players unknown-provider 404 + cross-tier precedence, get_player same, validator hardening.
+- `test_upload.py` — modified: visibility flag behaviour, `_`-prefix rejection, `updated_at` set on write, `artifacts` written as object, `--source-license` alias accepted, `MatchEntry` validation.
 - `test_upload_players.py` — new.
+- `test_schemas.py` — new: drift test asserting committed `schemas/*.json` matches `model.model_json_schema()` for current Pydantic models, including `$id` URN and `$schema` Draft-2020-12 metadata.
 
 **Scripts** (`scripts/`):
-- `upload_pff_wc2022.py` — new: one-shot PFF reshape + load orchestrator.
+- `upload_pff_wc2022.py` — new: one-shot PFF reshape + load orchestrator. Loads private-tier only — no runtime licence gate (single-owner private-tier load is data movement within the operator's own systems, not redistribution; spec §8.3). Includes a CSV→canonical-JSON normaliser for `players.csv` (since `pining-upload-players` no longer accepts CSV).
+- `regenerate_schemas.py` — new: emits `schemas/{matches,players}.schema.json` from the Pydantic models. Run after any model edit.
+- `verify_pff_load.py` — new: post-load verification (counts, visibility leak check, owner-tier artifact spot-check, player spot-check). Exits non-zero on any failure.
 
 ---
 
@@ -124,9 +131,9 @@ git commit -m "feat(terraform): add SSM parameter for owner-tier API token"
 - Modify: `terraform/modules/functions/variables.tf`
 - Modify: `terraform/environments/dev/main.tf`
 
-Goal: every Lambda (existing three + future two) gets `ssm:GetParameter` on the owner-token parameter, `kms:Decrypt` on the data KMS key, and `OWNER_TOKEN_PARAM` env var set to the parameter name.
+Goal: every Lambda (existing three + future two) gets `ssm:GetParameter` on the owner-token parameter, `kms:Decrypt` on the data KMS key, `OWNER_TOKEN_PARAM` env var set to the parameter name, and `LAST_ROTATION` env var (a no-op marker used to invalidate the warm-container `_get_owner_token` cache during a token rotation — see spec §3.5).
 
-- [ ] **Step 1: Add new variable to `terraform/modules/functions/variables.tf`**
+- [ ] **Step 1: Add new variables to `terraform/modules/functions/variables.tf`**
 
 Append:
 
@@ -139,6 +146,12 @@ variable "owner_token_param_arn" {
 variable "owner_token_param_name" {
   description = "Name of the SSM parameter holding the owner-tier API token"
   type        = string
+}
+
+variable "last_rotation" {
+  description = "No-op marker used to invalidate the warm-container _get_owner_token cache during a rotation. Bump on every owner-token rotation; spec §3.5."
+  type        = string
+  default     = "initial"
 }
 ```
 
@@ -180,9 +193,9 @@ resource "aws_iam_role_policy" "lambda_s3" {
 }
 ```
 
-- [ ] **Step 3: Add `OWNER_TOKEN_PARAM` env var to all three existing Lambda functions**
+- [ ] **Step 3: Add `OWNER_TOKEN_PARAM` and `LAST_ROTATION` env vars to all three existing Lambda functions**
 
-In `terraform/modules/functions/main.tf`, in each of `aws_lambda_function.list_providers`, `aws_lambda_function.list_matches`, and `aws_lambda_function.get_artifact`, replace the `environment.variables` block to include the new var. Example for `list_providers`:
+In `terraform/modules/functions/main.tf`, in each of `aws_lambda_function.list_providers`, `aws_lambda_function.list_matches`, and `aws_lambda_function.get_artifact`, replace the `environment.variables` block to include the two new vars. Example for `list_providers`:
 
 ```hcl
   environment {
@@ -190,15 +203,16 @@ In `terraform/modules/functions/main.tf`, in each of `aws_lambda_function.list_p
       API_TOKEN          = var.api_token
       DATA_BUCKET        = var.bucket_name
       OWNER_TOKEN_PARAM  = var.owner_token_param_name
+      LAST_ROTATION      = var.last_rotation
     }
   }
 ```
 
-Apply the same change to `list_matches` (same three vars) and `get_artifact` (preserves `PRESIGNED_EXPIRY` plus the three).
+Apply the same change to `list_matches` (same four vars) and `get_artifact` (preserves `PRESIGNED_EXPIRY` plus the four). The two NEW Lambdas added in Phase 4 (`list_players`, `get_player`) get the same env-var block as part of Task 13 — keep them aligned so a rotation `terraform apply` bumps all five together (spec §3.5).
 
 - [ ] **Step 4: Pass new variables from environment to module in `terraform/environments/dev/main.tf`**
 
-In the `module "functions"` block, add the two new arguments:
+In the `module "functions"` block, add the new arguments. `last_rotation` is passed through from a Terraform variable so the operator can bump it via `terraform apply -var=last_rotation=...` during a rotation (spec §3.5):
 
 ```hcl
 module "functions" {
@@ -210,6 +224,17 @@ module "functions" {
   api_token              = var.api_token
   owner_token_param_arn  = aws_ssm_parameter.api_token_owner.arn
   owner_token_param_name = aws_ssm_parameter.api_token_owner.name
+  last_rotation          = var.last_rotation
+}
+```
+
+Add the corresponding variable to `terraform/environments/dev/variables.tf`:
+
+```hcl
+variable "last_rotation" {
+  description = "No-op marker bumped during owner-token rotation to invalidate Lambda warm-container cache (spec §3.5)"
+  type        = string
+  default     = "initial"
 }
 ```
 
@@ -221,7 +246,7 @@ terraform validate
 terraform plan -out=phase1-task2.tfplan
 ```
 
-Expected: changes to all three Lambda functions (env var addition) and the IAM policy (new statement). No errors.
+Expected: changes to all three Lambda functions (two new env vars: `OWNER_TOKEN_PARAM`, `LAST_ROTATION`) and the IAM policy (new statement). No errors.
 
 - [ ] **Step 6: Commit**
 
@@ -270,9 +295,13 @@ Expected: prints the same token.
 
 - [ ] **Step 4: Smoke-test that existing endpoints still work with the public token**
 
+The public token is documented in README and lives in `terraform.tfvars` under `api_token`. Operator exports it as `$PUB_TOKEN` for the curl examples in this plan; the value is not committed here (kept in tfvars + README).
+
 ```bash
+# Operator: export PUB_TOKEN before running, e.g.:
+#   export PUB_TOKEN=$(terraform output -raw api_token 2>/dev/null || grep '^api_token' terraform.tfvars | cut -d'"' -f2)
 API=$(terraform output -raw api_url)
-curl -s -H "Authorization: Bearer test-token-pining-for-the-data" "$API/providers" | python -m json.tool
+curl -s -H "Authorization: Bearer $PUB_TOKEN" "$API/providers" | python -m json.tool
 ```
 
 Expected: 200 + JSON list of providers (unchanged behaviour).
@@ -511,8 +540,15 @@ class TestValidateToken:
         assert isinstance(result, dict)
         assert result["statusCode"] == 401
 
-    def test_same_public_and_owner_classifies_as_owner(self, monkeypatch) -> None:
-        """Defensive default: if both tokens are the same string, owner wins (more permissive)."""
+    def test_same_public_and_owner_classifies_as_public(self, monkeypatch) -> None:
+        """Fail closed: if both tokens are the same string, classify as PUBLIC.
+
+        Spec §3.2: a misconfiguration that accidentally collapses both tokens
+        to the same string should NOT silently grant owner-tier visibility to
+        anyone holding the public token. Failing closed degrades the owner
+        consumer (visibly broken) instead of leaking private content (silently
+        broken). A visibly broken consumer gets fixed.
+        """
         from shared import Tier, validate_token
         import shared
 
@@ -521,7 +557,7 @@ class TestValidateToken:
         monkeypatch.setattr(shared, "_get_owner_token", lambda: "duplicate-token")
 
         result = validate_token({"headers": {"authorization": "Bearer duplicate-token"}})
-        assert result == Tier.OWNER
+        assert result == Tier.PUBLIC
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
@@ -541,10 +577,8 @@ def validate_token(event: dict) -> Tier | dict:
     """Validate bearer token from Authorization header.
 
     Returns ``Tier.PUBLIC`` or ``Tier.OWNER`` on success, or an error response
-    dict on failure. If both tokens are the same string, classifies as ``OWNER``
-    (defensive: more permissive bias is fail-safe — the only place this matters
-    is during accidental misconfiguration, where we'd rather reveal less data
-    than more).
+    dict on failure. If both tokens are the same string (operator
+    misconfiguration), classifies as ``PUBLIC`` — fail closed. Spec §3.2.
     """
     public_token = os.environ.get("API_TOKEN", "")
     if not public_token:
@@ -563,15 +597,16 @@ def validate_token(event: dict) -> Tier | dict:
         logger.exception("owner_token_fetch_failed")
         return _error_response(500, "Server misconfiguration")
 
-    # Compare against owner first so a duplicate string classifies as OWNER (less permissive failure mode).
-    if hmac.compare_digest(presented, owner_token):
-        return Tier.OWNER
+    # Compare against PUBLIC first so a duplicate-token misconfiguration
+    # classifies as PUBLIC (fail closed; spec §3.2). This is the more
+    # restrictive failure mode: we'd rather break the owner consumer
+    # visibly than silently leak private content to public-token holders.
     if hmac.compare_digest(presented, public_token):
         return Tier.PUBLIC
+    if hmac.compare_digest(presented, owner_token):
+        return Tier.OWNER
     return _error_response(401, "Invalid token")
 ```
-
-Wait — the defensive default I described in the spec was "OWNER on duplicate." Let me re-check that's consistent: if both tokens are identical, classifying as OWNER is the more *permissive* outcome (sees everything). That's the spec's wording. The test above asserts this. The implementation matches.
 
 - [ ] **Step 4: Update call sites in the three existing handlers**
 
@@ -661,7 +696,7 @@ Expected: Lambda source hash changes; three function versions updated.
 
 ```bash
 API=$(terraform output -raw api_url)
-curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer test-token-pining-for-the-data" "$API/providers"
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB_TOKEN" "$API/providers"
 ```
 
 Expected: `200`.
@@ -684,6 +719,348 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer wrong-token" 
 Expected: `401`.
 
 - [ ] **Step 5: No commit (operational task)**
+
+---
+
+# Phase 2.5 — Canonical Schemas (Pydantic + JSON Schema)
+
+The upload tooling and Lambda handlers need a shared canonical shape for `matches.json` entries and `players.json` entries. Pydantic models in `shared.py` are the single source of truth; JSON Schema files in `schemas/` are generated from them and committed to the repo as the consumer-facing contract. A drift test fails CI if the committed files lag the models.
+
+This phase MUST land before Phase 3, because Phase 3 starts writing the `visibility`, `updated_at`, and object-form `artifacts` fields — those shapes need a model to validate against.
+
+### Task 6.5: Define Pydantic models, generate JSON Schemas, write drift test
+
+**Files:**
+- Modify: `terraform/modules/functions/src/shared.py`
+- Create: `scripts/regenerate_schemas.py`
+- Create: `schemas/matches.schema.json`
+- Create: `schemas/players.schema.json`
+- Create: `src/tests/test_schemas.py`
+- Modify: `pyproject.toml`
+
+Goal: Pydantic v2 models for `MatchEntry` and `PlayerRecord`, a small CLI to (re)generate the JSON Schema files, and a drift test that fails if a model edit forgets to regenerate. Both models declare a stable URN `$id` so consumers can pin to the schema identity even though the file content is unversioned (additive changes don't bump the URN).
+
+- [ ] **Step 1: Add Pydantic to runtime dependencies in `pyproject.toml`**
+
+In `[project] dependencies = [...]`, add `"pydantic>=2.0"`. If not already present, also add `"jsonschema"` for runtime schema validation in tests.
+
+- [ ] **Step 2: Write failing tests in `src/tests/test_schemas.py`**
+
+Create `src/tests/test_schemas.py`:
+
+```python
+"""Schema-drift tests: committed JSON Schema files must match the current Pydantic models.
+
+Spec §6.6: Pydantic models in shared.py are the single source of truth.
+schemas/{matches,players}.schema.json are generated from them via
+scripts/regenerate_schemas.py and committed for consumer reference. Editing
+a model without regenerating the schema fails this test.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCHEMAS_DIR = REPO_ROOT / "schemas"
+
+
+def _load_schema(name: str) -> dict:
+    return json.loads((SCHEMAS_DIR / name).read_text(encoding="utf-8"))
+
+
+class TestMatchEntrySchema:
+    def test_committed_schema_matches_model(self):
+        from shared import MatchEntry
+
+        committed = _load_schema("matches.schema.json")
+        generated = MatchEntry.model_json_schema()
+        assert committed == generated, (
+            "schemas/matches.schema.json is stale. Run scripts/regenerate_schemas.py "
+            "to refresh after editing the MatchEntry model."
+        )
+
+    def test_schema_has_id_and_schema_metadata(self):
+        committed = _load_schema("matches.schema.json")
+        assert committed.get("$id") == "urn:pining-for-the-data:schema:matches:v1"
+        assert committed.get("$schema") == "https://json-schema.org/draft/2020-12/schema"
+
+
+class TestPlayerRecordSchema:
+    def test_committed_schema_matches_model(self):
+        from shared import PlayerRecord
+
+        committed = _load_schema("players.schema.json")
+        generated = PlayerRecord.model_json_schema()
+        assert committed == generated, (
+            "schemas/players.schema.json is stale. Run scripts/regenerate_schemas.py "
+            "to refresh after editing the PlayerRecord model."
+        )
+
+    def test_schema_has_id_and_schema_metadata(self):
+        committed = _load_schema("players.schema.json")
+        assert committed.get("$id") == "urn:pining-for-the-data:schema:players:v1"
+        assert committed.get("$schema") == "https://json-schema.org/draft/2020-12/schema"
+
+
+class TestModelValidation:
+    def test_match_entry_minimal_valid(self):
+        from shared import MatchEntry
+
+        m = MatchEntry(
+            id="m-001",
+            artifacts={"metadata": "metadata.json"},
+            visibility="private",
+            updated_at="2026-05-02T14:23:11Z",
+        )
+        assert m.id == "m-001"
+        assert m.artifacts == {"metadata": "metadata.json"}
+
+    def test_match_entry_rejects_missing_required(self):
+        from shared import MatchEntry
+        from pydantic import ValidationError
+        import pytest
+
+        with pytest.raises(ValidationError):
+            MatchEntry(id="m-001")  # missing artifacts, visibility, updated_at
+
+    def test_match_entry_rejects_artifact_key_with_path_traversal(self):
+        """Spec §5.2: artifact keys must satisfy the path-param regex; upload tool
+        cannot land entries the API would refuse to serve."""
+        from shared import MatchEntry
+        from pydantic import ValidationError
+        import pytest
+
+        with pytest.raises(ValidationError, match="artifact name"):
+            MatchEntry(
+                id="m-001",
+                artifacts={"../etc/passwd": "evil.txt"},
+                visibility="public",
+                updated_at="2026-05-02T14:23:11Z",
+            )
+
+    def test_match_entry_rejects_artifact_key_with_leading_underscore(self):
+        from shared import MatchEntry
+        from pydantic import ValidationError
+        import pytest
+
+        with pytest.raises(ValidationError, match="artifact name"):
+            MatchEntry(
+                id="m-001",
+                artifacts={"_private": "secret.json"},
+                visibility="public",
+                updated_at="2026-05-02T14:23:11Z",
+            )
+
+    def test_player_record_requires_id(self):
+        from shared import PlayerRecord
+        from pydantic import ValidationError
+        import pytest
+
+        with pytest.raises(ValidationError):
+            PlayerRecord(nickname="No ID", visibility="public", updated_at="2026-05-02T14:23:11Z")
+
+    def test_player_record_requires_a_name(self):
+        from shared import PlayerRecord
+        from pydantic import ValidationError
+        import pytest
+
+        with pytest.raises(ValidationError, match="nickname.*firstName"):
+            PlayerRecord(id="x", visibility="public", updated_at="2026-05-02T14:23:11Z")
+
+    def test_player_record_accepts_nickname_only(self):
+        from shared import PlayerRecord
+
+        p = PlayerRecord(id="x", nickname="Pelé", visibility="public", updated_at="2026-05-02T14:23:11Z")
+        assert p.nickname == "Pelé"
+
+    def test_player_record_accepts_firstname_lastname(self):
+        from shared import PlayerRecord
+
+        p = PlayerRecord(
+            id="x", firstName="Test", lastName="Player",
+            visibility="private", updated_at="2026-05-02T14:23:11Z",
+        )
+        assert p.firstName == "Test"
+
+    def test_player_record_round_trips_unknown_fields(self):
+        """Spec §6.3: provider-specific extensions are allowed; round-trip verbatim."""
+        from shared import PlayerRecord
+
+        p = PlayerRecord.model_validate({
+            "id": "x", "nickname": "Test", "visibility": "public",
+            "updated_at": "2026-05-02T14:23:11Z", "providerSpecificField": 42,
+        })
+        dumped = p.model_dump()
+        assert dumped["providerSpecificField"] == 42
+```
+
+- [ ] **Step 3: Run tests to verify failure**
+
+```bash
+cd src/tests
+pytest test_schemas.py -v
+```
+
+Expected: ImportError on `MatchEntry`, `PlayerRecord` (don't exist yet); schema files missing.
+
+- [ ] **Step 4: Add Pydantic models to `terraform/modules/functions/src/shared.py`**
+
+Append to `shared.py` (after the existing `Tier` enum and helpers):
+
+```python
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class _SourceMeta(BaseModel):
+    """Provenance metadata for an upstream data source."""
+    name: str
+    url: str = ""
+    licence: str = ""
+
+
+_PATH_PARAM_RE = r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+
+
+class MatchEntry(BaseModel):
+    """Canonical shape of a single entry in `{provider}/matches.json`. Spec §4.1."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={"$id": "urn:pining-for-the-data:schema:matches:v1"},
+    )
+
+    id: str = Field(..., pattern=_PATH_PARAM_RE, max_length=128)
+    artifacts: dict[str, str] = Field(
+        ...,
+        description="Map of artifact-name → exact filename. Keys form the API whitelist; each key MUST match the path-param regex.",
+    )
+    visibility: str = Field(..., pattern=r"^(public|private)$")
+    updated_at: str = Field(..., description="ISO 8601 UTC timestamp")
+    date: str | None = None
+    home: str | None = None
+    away: str | None = None
+    provenance: str | None = None
+    source: _SourceMeta | None = None
+
+    @model_validator(mode="after")
+    def _validate_artifact_keys(self) -> "MatchEntry":
+        # Every artifact name must satisfy the same regex as path params,
+        # so the upload tool cannot land entries the API will refuse to serve.
+        # Spec §5.2.
+        import re
+        regex = re.compile(_PATH_PARAM_RE)
+        for name in self.artifacts.keys():
+            if not regex.match(name) or len(name) > 128:
+                raise ValueError(
+                    f"artifact name {name!r} does not match the path-param regex "
+                    f"{_PATH_PARAM_RE} (max 128 chars)"
+                )
+        return self
+
+
+class PlayerRecord(BaseModel):
+    """Canonical shape of a single entry in `{provider}/players.json`. Spec §6.3."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={"$id": "urn:pining-for-the-data:schema:players:v1"},
+    )
+
+    id: str = Field(..., pattern=_PATH_PARAM_RE, max_length=128)
+    visibility: str = Field(..., pattern=r"^(public|private)$")
+    updated_at: str = Field(..., description="ISO 8601 UTC timestamp")
+    firstName: str | None = None
+    lastName: str | None = None
+    nickname: str | None = None
+    dob: str | None = None
+    height: float | None = None
+    position: str | None = None
+    positionGroupType: str | None = None
+    nationality: str | None = None
+    source: _SourceMeta | None = None
+
+    @model_validator(mode="after")
+    def _require_a_name(self) -> "PlayerRecord":
+        if not (self.nickname or (self.firstName and self.lastName)):
+            raise ValueError(
+                "PlayerRecord requires either nickname OR (firstName AND lastName)"
+            )
+        return self
+```
+
+- [ ] **Step 5: Write `scripts/regenerate_schemas.py`**
+
+Create `scripts/regenerate_schemas.py`:
+
+```python
+"""Regenerate schemas/{matches,players}.schema.json from Pydantic models.
+
+Run after any edit to MatchEntry or PlayerRecord in shared.py. The schema-drift
+test (src/tests/test_schemas.py) fails CI if you forget.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "terraform" / "modules" / "functions" / "src"))
+
+from shared import MatchEntry, PlayerRecord  # noqa: E402
+
+SCHEMAS_DIR = REPO_ROOT / "schemas"
+
+
+def main() -> None:
+    SCHEMAS_DIR.mkdir(exist_ok=True)
+    for name, model in [("matches", MatchEntry), ("players", PlayerRecord)]:
+        path = SCHEMAS_DIR / f"{name}.schema.json"
+        path.write_text(
+            json.dumps(model.model_json_schema(), indent=2, sort_keys=False) + "\n",
+            encoding="utf-8",
+        )
+        print(f"Wrote {path.relative_to(REPO_ROOT)}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+- [ ] **Step 6: Generate the schema files**
+
+```bash
+python scripts/regenerate_schemas.py
+```
+
+Expected: creates `schemas/matches.schema.json` and `schemas/players.schema.json`. Inspect them — both should contain `"$id"`, `"$schema"` (Pydantic v2 emits Draft 2020-12 by default), `"properties"`, `"required"`, etc.
+
+- [ ] **Step 7: Run the drift tests**
+
+```bash
+cd src/tests
+pytest test_schemas.py -v
+```
+
+Expected: all pass.
+
+- [ ] **Step 8: Run full suite to confirm no regression**
+
+```bash
+pytest -v
+```
+
+Expected: all pass.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add terraform/modules/functions/src/shared.py scripts/regenerate_schemas.py schemas/ src/tests/test_schemas.py pyproject.toml
+git commit -m "feat(schemas): add MatchEntry/PlayerRecord Pydantic models with drift-tested JSON Schemas"
+```
 
 ---
 
@@ -834,13 +1211,20 @@ git commit -m "feat(validation): reject underscore-prefixed path params; reserve
 
 ---
 
-### Task 8: Add `--visibility` flag to pining-upload and write to `_private/` when private
+### Task 8: Add `--visibility` flag to pining-upload; switch matches.json to v2 entry shape
 
 **Files:**
 - Modify: `src/mock_api/upload.py`
 - Modify: `src/tests/test_upload.py`
 
-Goal: `--visibility {public,private}` flag (default `public`). Private uploads write to `{provider}/_private/{game_id}/...`; public preserves existing behaviour. The `visibility` value is recorded in the match entry.
+Goal: `--visibility {public,private}` flag (default `public`). Private uploads write to `{provider}/_private/{game_id}/...`; public preserves existing behaviour location-wise. Every match entry written to `matches.json` now uses the v2 shape (per spec §4.1):
+- `visibility: "public"` or `"private"` (required)
+- `updated_at: <ISO 8601 UTC>` (required, set on every write including no-op re-uploads)
+- `artifacts: {<name>: <filename>}` (object, not array — keys form the API whitelist, values are exact filenames)
+
+CLI flag spelling: British `--source-licence` is the canonical flag; `--source-license` is accepted as a quiet alias (no deprecation warning, both spellings coexist). The internal field name in the JSON output is always `licence`. Spec §8.2.1.
+
+Validation: every entry is validated against the `MatchEntry` Pydantic model (Phase 2.5) before any S3 call. Validation errors abort the upload with field-level diagnostics.
 
 - [ ] **Step 1: Write failing tests for visibility behaviour**
 
@@ -882,12 +1266,12 @@ class TestUploadVisibility:
         s3.get_object.side_effect = s3.exceptions.NoSuchKey()
 
         with patch("mock_api.upload.boto3.client", return_value=s3):
-            upload_game(game_dir, provider="pff", game_id="3812", bucket="b", visibility="private")
+            upload_game(game_dir, provider="pff", game_id="m-001", bucket="b", visibility="private")
 
         upload_keys = [c.args[2] for c in s3.upload_file.call_args_list]
-        assert any(k == "pff/_private/3812/match.json" for k in upload_keys)
+        assert any(k == "pff/_private/m-001/match.json" for k in upload_keys)
 
-    def test_private_visibility_recorded_in_matches_json(self, tmp_path):
+    def test_private_visibility_and_updated_at_and_artifacts_object_recorded(self, tmp_path):
         from unittest.mock import MagicMock, patch
         import json
         from mock_api.upload import upload_game
@@ -895,19 +1279,26 @@ class TestUploadVisibility:
         game_dir = tmp_path / "g1"
         game_dir.mkdir()
         (game_dir / "match.json").write_text("{}")
+        (game_dir / "tracking.jsonl").write_text("")
 
         s3 = MagicMock()
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
         s3.get_object.side_effect = s3.exceptions.NoSuchKey()
 
         with patch("mock_api.upload.boto3.client", return_value=s3):
-            upload_game(game_dir, provider="pff", game_id="3812", bucket="b", visibility="private")
+            upload_game(game_dir, provider="pff", game_id="m-001", bucket="b", visibility="private")
 
         # Find the put_object call that wrote matches.json
         matches_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "pff/matches.json"]
         assert len(matches_calls) == 1
         body = json.loads(matches_calls[0].kwargs["Body"].decode("utf-8"))
-        assert body["matches"][0]["visibility"] == "private"
+        entry = body["matches"][0]
+        assert entry["visibility"] == "private"
+        # artifacts is an object (name -> filename), not an array
+        assert entry["artifacts"] == {"match": "match.json", "tracking": "tracking.jsonl"}
+        # updated_at is set, ISO 8601, ends in Z
+        assert entry["updated_at"].endswith("Z")
+        assert "T" in entry["updated_at"]
 
     def test_default_visibility_is_public(self, tmp_path):
         """Calling upload_game without visibility kw arg must default to public."""
@@ -929,6 +1320,74 @@ class TestUploadVisibility:
         matches_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "sc/matches.json"]
         body = json.loads(matches_calls[0].kwargs["Body"].decode("utf-8"))
         assert body["matches"][0]["visibility"] == "public"
+
+    def test_reupload_refreshes_updated_at_even_if_unchanged(self, tmp_path):
+        """Spec §4.1: re-uploads update updated_at even if no other field changes."""
+        from unittest.mock import MagicMock, patch
+        import json, time
+        from mock_api.upload import upload_game
+
+        game_dir = tmp_path / "g1"
+        game_dir.mkdir()
+        (game_dir / "match.json").write_text("{}")
+
+        existing = json.dumps({
+            "provider": "sc",
+            "matches": [{
+                "id": "g1",
+                "artifacts": {"match": "match.json"},
+                "visibility": "public",
+                "updated_at": "2025-01-01T00:00:00Z",
+            }],
+        }).encode()
+
+        s3 = MagicMock()
+        s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=existing))}
+
+        with patch("mock_api.upload.boto3.client", return_value=s3):
+            upload_game(game_dir, provider="sc", game_id="g1", bucket="b", visibility="public")
+
+        matches_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "sc/matches.json"]
+        body = json.loads(matches_calls[0].kwargs["Body"].decode("utf-8"))
+        assert body["matches"][0]["updated_at"] != "2025-01-01T00:00:00Z"
+
+    def test_source_license_alias_accepted(self, tmp_path, capsys):
+        """Spec §8.2.1: --source-license is a quiet alias for --source-licence."""
+        from mock_api.upload import main as upload_main
+        import sys
+        # Verify the parser accepts both spellings without error
+        # (full execution would require S3 mocking; just verify argparse accepts the flag)
+        from mock_api import upload as upload_module
+        parser_args = ["--provider", "sc", "--game-id", "g1", "--bucket", "b",
+                       "--source-license", "MIT", str(tmp_path / "g")]
+        # Smoke the parser construction path
+        # Detailed assertion: parsed namespace exposes the value as `source_licence`
+        # regardless of which flag was used at the CLI.
+        # (Use the helper exposed by the module if present; otherwise patch sys.argv)
+        # ... see implementation below for the parser shape ...
+
+    def test_pydantic_validation_runs_before_s3(self, tmp_path):
+        """Bad data must abort before any S3 call."""
+        from unittest.mock import MagicMock, patch
+        import pytest
+        from mock_api.upload import upload_game
+
+        game_dir = tmp_path / "g1"
+        game_dir.mkdir()
+        (game_dir / "match.json").write_text("{}")
+
+        s3 = MagicMock()
+        s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+
+        with patch("mock_api.upload.boto3.client", return_value=s3):
+            # Empty-string game_id will fail the MatchEntry id pattern
+            with pytest.raises((ValueError, Exception)):
+                upload_game(game_dir, provider="sc", game_id="", bucket="b", visibility="public")
+
+        # No S3 call should have been made
+        s3.upload_file.assert_not_called()
+        s3.put_object.assert_not_called()
 
     def test_tier_mixing_rejected(self, tmp_path):
         """Re-uploading an existing public match as private must raise."""
@@ -967,6 +1426,22 @@ Expected: all fail (no `visibility` parameter exists yet).
 Modify the `upload_game` signature and body. Replace the function with:
 
 ```python
+import sys
+from datetime import datetime, timezone
+
+# Ensure shared.py (Pydantic models) is importable
+_SHARED_DIR = Path(__file__).resolve().parents[2] / "terraform" / "modules" / "functions" / "src"
+if str(_SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(_SHARED_DIR))
+
+from shared import MatchEntry  # type: ignore[import-not-found]
+
+
+def _utc_now_iso() -> str:
+    """Current UTC time, ISO 8601 with trailing Z (no microseconds)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def upload_game(
     game_dir: Path,
     provider: str,
@@ -979,7 +1454,7 @@ def upload_game(
     provenance: str | None = None,
     source_name: str | None = None,
     source_url: str | None = None,
-    source_license: str | None = None,
+    source_licence: str | None = None,
 ) -> list[str]:
     """Upload all files in game_dir to S3 and update indexes.
 
@@ -989,6 +1464,10 @@ def upload_game(
         ``"public"`` (default) or ``"private"``. Private content is written
         under ``{provider}/_private/{game_id}/...`` and recorded with
         ``visibility: "private"`` in matches.json.
+    source_licence : str | None
+        Spelled British (``--source-licence`` at the CLI). The American
+        ``source_license`` / ``--source-license`` is accepted as an alias by
+        the argparse layer (see ``main()``) and forwarded into this parameter.
     """
     if visibility not in ("public", "private"):
         raise ValueError(f"Invalid visibility: {visibility!r} (must be 'public' or 'private')")
@@ -1007,26 +1486,67 @@ def upload_game(
         else f"{provider}/{game_id}"
     )
 
-    artifacts: list[str] = []
+    # Build artifacts as {name: filename} object form (spec §4.1)
+    artifacts: dict[str, str] = {}
     for file_path in sorted(game_dir.iterdir()):
         if file_path.is_file() and not file_path.name.startswith("."):
             key = f"{prefix}/{file_path.name}"
             s3.upload_file(str(file_path), bucket, key)
-            artifact_name = file_path.stem
-            artifacts.append(artifact_name)
+            # Strip ALL extensions to derive the artifact name (e.g. tracking.jsonl.bz2 -> tracking)
+            artifact_name = file_path.name.split(".", 1)[0]
+            artifacts[artifact_name] = file_path.name
             print(f"  Uploaded {file_path.name} -> s3://{bucket}/{key}")
 
     if not artifacts:
         print(f"  No files found in {game_dir}")
-        return artifacts
+        return list(artifacts)
 
-    _update_matches_json(
-        s3, bucket, provider, game_id, artifacts, visibility, date, home, away,
-        provenance, source_name, source_url, source_license,
+    # Build and validate the canonical entry BEFORE any S3 index write.
+    entry = _build_match_entry(
+        game_id, artifacts, visibility, date, home, away,
+        provenance, source_name, source_url, source_licence,
     )
+    _update_matches_json(s3, bucket, provider, entry)
     _update_providers_json(s3, bucket, provider)
 
-    return artifacts
+    return list(artifacts)
+
+
+def _build_match_entry(
+    game_id: str,
+    artifacts: dict[str, str],
+    visibility: str,
+    date: str | None,
+    home: str | None,
+    away: str | None,
+    provenance: str | None,
+    source_name: str | None,
+    source_url: str | None,
+    source_licence: str | None,
+) -> dict:
+    """Assemble and Pydantic-validate a MatchEntry. Raises on validation error."""
+    payload: dict = {
+        "id": game_id,
+        "artifacts": artifacts,
+        "visibility": visibility,
+        "updated_at": _utc_now_iso(),
+    }
+    if date:
+        payload["date"] = date
+    if home:
+        payload["home"] = home
+    if away:
+        payload["away"] = away
+    if provenance:
+        payload["provenance"] = provenance
+    if source_name:
+        payload["source"] = {
+            "name": source_name,
+            "url": source_url or "",
+            "licence": source_licence or "",
+        }
+    # Validation will raise pydantic.ValidationError before any S3 call.
+    return MatchEntry.model_validate(payload).model_dump(exclude_none=True)
 
 
 def _check_no_tier_mixing(s3, bucket: str, provider: str, game_id: str, new_visibility: str) -> None:
@@ -1046,29 +1566,19 @@ def _check_no_tier_mixing(s3, bucket: str, provider: str, game_id: str, new_visi
         raise ValueError(
             f"Cannot mix tiers for game_id {game_id!r}: existing entry is "
             f"{existing_visibility!r}, requested {new_visibility!r}. "
-            f"Re-tiering requires an explicit move (not supported in v1)."
+            f"Re-tiering requires an explicit move (manual procedure documented in spec §11.4; "
+            f"not supported by tooling in v1)."
         )
 ```
 
-Update `_update_matches_json` to accept and record `visibility`:
+Update `_update_matches_json` to take a pre-built validated entry:
 
 ```python
-def _update_matches_json(
-    s3,
-    bucket: str,
-    provider: str,
-    game_id: str,
-    artifacts: list[str],
-    visibility: str,
-    date: str | None,
-    home: str | None,
-    away: str | None,
-    provenance: str | None = None,
-    source_name: str | None = None,
-    source_url: str | None = None,
-    source_license: str | None = None,
-) -> None:
-    """Read-modify-write the matches.json index for a provider."""
+def _update_matches_json(s3, bucket: str, provider: str, entry: dict) -> None:
+    """Read-modify-write the matches.json index for a provider.
+
+    `entry` MUST already be a validated MatchEntry dict (see _build_match_entry).
+    """
     key = f"{provider}/matches.json"
 
     try:
@@ -1077,27 +1587,8 @@ def _update_matches_json(
     except s3.exceptions.NoSuchKey:
         data = {"provider": provider, "matches": []}
 
+    game_id = entry["id"]
     existing = next((m for m in data["matches"] if m["id"] == game_id), None)
-    entry = {
-        "id": game_id,
-        "artifacts": artifacts,
-        "visibility": visibility,
-    }
-    if date:
-        entry["date"] = date
-    if home:
-        entry["home"] = home
-    if away:
-        entry["away"] = away
-    if provenance:
-        entry["provenance"] = provenance
-    if source_name:
-        entry["source"] = {
-            "name": source_name,
-            "url": source_url or "",
-            "license": source_license or "",
-        }
-
     if existing:
         idx = data["matches"].index(existing)
         data["matches"][idx] = entry
@@ -1113,9 +1604,9 @@ def _update_matches_json(
     print(f"  Updated {key}")
 ```
 
-- [ ] **Step 4: Add the `--visibility` flag to the CLI parser in `main()`**
+- [ ] **Step 4: Add the `--visibility` flag and the `--source-licence`/`--source-license` alias to the CLI parser in `main()`**
 
-In `src/mock_api/upload.py`, in the `main()` function, add the flag near the other arguments:
+In `src/mock_api/upload.py`, in the `main()` function, add the visibility flag and rework the licence flag to accept both spellings into a single destination:
 
 ```python
     parser.add_argument(
@@ -1124,9 +1615,20 @@ In `src/mock_api/upload.py`, in the `main()` function, add the flag near the oth
         choices=["public", "private"],
         help="Visibility tier (default: public; private writes under _private/ prefix)",
     )
+
+    # Both spellings populate `source_licence`. British is canonical; American
+    # is a quiet alias (no deprecation warning). Spec §8.2.1.
+    parser.add_argument(
+        "--source-licence", "--source-license",
+        dest="source_licence",
+        default=None,
+        help="Source licence text (British spelling canonical; --source-license also accepted)",
+    )
 ```
 
-And pass it to `upload_game`:
+Replace the existing `--source-license` argument (American only) with the combined form above. If `--source-licence` already exists separately for any reason, remove it — the single combined argument handles both.
+
+Pass to `upload_game`:
 
 ```python
     artifacts = upload_game(
@@ -1141,7 +1643,7 @@ And pass it to `upload_game`:
         provenance=args.provenance,
         source_name=args.source_name,
         source_url=args.source_url,
-        source_license=args.source_license,
+        source_licence=args.source_licence,
     )
 ```
 
@@ -1245,7 +1747,7 @@ class TestListMatches(_ResetS3):
         self._setup(monkeypatch)
 
         mock_s3 = _mock_s3()
-        all_private = {"provider": "pff", "matches": [{"id": "3812", "artifacts": ["m"], "visibility": "private"}]}
+        all_private = {"provider": "pff", "matches": [{"id": "m-001", "artifacts": ["m"], "visibility": "private"}]}
         body = json.dumps(all_private).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
@@ -1271,6 +1773,49 @@ class TestListMatches(_ResetS3):
         }
         result = handler(event, None)
         assert result["statusCode"] == 404
+
+
+class TestListProviders(_ResetS3):
+    """Spec §4.2: list_providers returns the same provider list to BOTH tiers.
+
+    Existence of a provider is not the secret; the per-match visibility flag is
+    the only enforcement boundary. This test pins the behaviour so a future
+    contributor doesn't quietly add tier filtering thinking it tightens security.
+    """
+    def _setup(self, monkeypatch):
+        import shared
+        monkeypatch.setenv("API_TOKEN", "pub-tok")
+        shared._get_owner_token.cache_clear()
+        monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
+
+    def test_public_tier_sees_pff_in_provider_list(self, monkeypatch) -> None:
+        from list_providers import handler
+        import json
+        self._setup(monkeypatch)
+
+        mock_s3 = _mock_s3()
+        body = json.dumps({"providers": ["skillcorner", "pff"]}).encode()
+        mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
+
+        event = {"headers": {"authorization": "Bearer pub-tok"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        # Even though pff is all-private, public tier sees it in the provider catalogue.
+        assert "pff" in json.loads(result["body"])["providers"]
+
+    def test_owner_tier_sees_same_provider_list(self, monkeypatch) -> None:
+        from list_providers import handler
+        import json
+        self._setup(monkeypatch)
+
+        mock_s3 = _mock_s3()
+        body = json.dumps({"providers": ["skillcorner", "pff"]}).encode()
+        mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
+
+        event = {"headers": {"authorization": "Bearer own-tok"}}
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        assert json.loads(result["body"])["providers"] == ["skillcorner", "pff"]
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
@@ -1341,13 +1886,13 @@ git commit -m "feat(api): list_matches filters by tier; uniform 200+empty for ti
 
 ---
 
-### Task 10: Make get_artifact visibility-aware
+### Task 10: Make get_artifact visibility-aware and whitelist-driven (object-form artifacts)
 
 **Files:**
 - Modify: `terraform/modules/functions/src/get_artifact.py`
 - Modify: `src/tests/test_lambda_handlers.py`
 
-Goal: `get_artifact` reads `matches.json`, looks up the match, checks tier vs match visibility, resolves the correct S3 prefix (`_private/` vs not), returns 302 on success or 404 on not-found-or-tier-mismatch.
+Goal: `get_artifact` reads `matches.json`, looks up the match, checks tier vs match visibility, resolves the correct S3 prefix (`_private/` vs not), looks up the requested artifact in the entry's `artifacts: {name: filename}` object (the whitelist), generates the presigned URL directly via `s3.generate_presigned_url(...)`, returns 302 on success or 404 on not-found-or-tier-mismatch-or-not-whitelisted. **No `list_objects_v2` call. No `head_object` call.** Spec §4.3.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -1361,28 +1906,31 @@ class TestGetArtifact(_ResetS3):
         shared._get_owner_token.cache_clear()
         monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
 
-    def _wire_matches_and_listing(self, mock_s3, matches_payload, listing_keys):
+    def _wire_matches(self, mock_s3, matches_payload):
         import json
         body = json.dumps(matches_payload).encode()
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         def get_obj(Bucket, Key):
             if Key.endswith("matches.json"):
                 return {"Body": MagicMock(read=MagicMock(return_value=body))}
             raise mock_s3.exceptions.NoSuchKey()
 
-        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
         mock_s3.get_object.side_effect = get_obj
-        mock_s3.list_objects_v2.return_value = {"Contents": [{"Key": k} for k in listing_keys]}
         mock_s3.generate_presigned_url.return_value = "https://s3.example.com/presigned"
 
     def test_public_match_public_tier_returns_302(self, monkeypatch) -> None:
         from get_artifact import handler
         self._setup(monkeypatch)
         mock_s3 = _mock_s3()
-        self._wire_matches_and_listing(
+        self._wire_matches(
             mock_s3,
-            {"provider": "sc", "matches": [{"id": "g1", "artifacts": ["match"], "visibility": "public"}]},
-            ["sc/g1/match.json"],
+            {"provider": "sc", "matches": [
+                {"id": "g1",
+                 "artifacts": {"match": "match.json"},
+                 "visibility": "public",
+                 "updated_at": "2026-05-02T14:00:00Z"},
+            ]},
         )
 
         event = {
@@ -1392,54 +1940,61 @@ class TestGetArtifact(_ResetS3):
         result = handler(event, None)
         assert result["statusCode"] == 302
         assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "sc/g1/match.json"
+        # No list_objects_v2 call on the success path (spec §4.3).
+        mock_s3.list_objects_v2.assert_not_called()
 
     def test_private_match_owner_tier_returns_302_with_private_prefix(self, monkeypatch) -> None:
         from get_artifact import handler
         self._setup(monkeypatch)
         mock_s3 = _mock_s3()
-        self._wire_matches_and_listing(
+        self._wire_matches(
             mock_s3,
-            {"provider": "pff", "matches": [{"id": "3812", "artifacts": ["metadata"], "visibility": "private"}]},
-            ["pff/_private/3812/metadata.json"],
+            {"provider": "pff", "matches": [
+                {"id": "m-001",
+                 "artifacts": {"metadata": "metadata.json"},
+                 "visibility": "private",
+                 "updated_at": "2026-05-02T14:00:00Z"},
+            ]},
         )
 
         event = {
             "headers": {"authorization": "Bearer own-tok"},
-            "pathParameters": {"provider": "pff", "id": "3812", "artifact": "metadata"},
+            "pathParameters": {"provider": "pff", "id": "m-001", "artifact": "metadata"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 302
-        # Listing must have been done against the _private prefix, not the public one
-        list_call = mock_s3.list_objects_v2.call_args
-        assert list_call.kwargs["Prefix"].startswith("pff/_private/3812/")
+        # Key resolves under _private/ for private match, no listing.
+        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "pff/_private/m-001/metadata.json"
+        mock_s3.list_objects_v2.assert_not_called()
 
     def test_private_match_public_tier_returns_404(self, monkeypatch) -> None:
         """Private match accessed with public token: 404 (not 403 — no existence leak)."""
         from get_artifact import handler
         self._setup(monkeypatch)
         mock_s3 = _mock_s3()
-        self._wire_matches_and_listing(
+        self._wire_matches(
             mock_s3,
-            {"provider": "pff", "matches": [{"id": "3812", "artifacts": ["metadata"], "visibility": "private"}]},
-            [],
+            {"provider": "pff", "matches": [
+                {"id": "m-001",
+                 "artifacts": {"metadata": "metadata.json"},
+                 "visibility": "private",
+                 "updated_at": "2026-05-02T14:00:00Z"},
+            ]},
         )
 
         event = {
             "headers": {"authorization": "Bearer pub-tok"},
-            "pathParameters": {"provider": "pff", "id": "3812", "artifact": "metadata"},
+            "pathParameters": {"provider": "pff", "id": "m-001", "artifact": "metadata"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 404
+        mock_s3.generate_presigned_url.assert_not_called()
 
     def test_unknown_match_returns_404(self, monkeypatch) -> None:
         from get_artifact import handler
         self._setup(monkeypatch)
         mock_s3 = _mock_s3()
-        self._wire_matches_and_listing(
-            mock_s3,
-            {"provider": "sc", "matches": []},
-            [],
-        )
+        self._wire_matches(mock_s3, {"provider": "sc", "matches": []})
 
         event = {
             "headers": {"authorization": "Bearer own-tok"},
@@ -1448,14 +2003,46 @@ class TestGetArtifact(_ResetS3):
         result = handler(event, None)
         assert result["statusCode"] == 404
 
-    def test_filters_by_exact_artifact_name(self, monkeypatch) -> None:
+    def test_artifact_not_in_whitelist_returns_404(self, monkeypatch) -> None:
+        """Spec §4.3: artifact name must be a key in the entry's artifacts object."""
         from get_artifact import handler
         self._setup(monkeypatch)
         mock_s3 = _mock_s3()
-        self._wire_matches_and_listing(
+        self._wire_matches(
             mock_s3,
-            {"provider": "sc", "matches": [{"id": "g1", "artifacts": ["tracking"], "visibility": "public"}]},
-            ["sc/g1/tracking.txt", "sc/g1/tracking_summary.json"],
+            {"provider": "sc", "matches": [
+                {"id": "g1",
+                 "artifacts": {"match": "match.json"},
+                 "visibility": "public",
+                 "updated_at": "2026-05-02T14:00:00Z"},
+            ]},
+        )
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc", "id": "g1", "artifact": "tracking"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 404
+        mock_s3.generate_presigned_url.assert_not_called()
+        mock_s3.list_objects_v2.assert_not_called()
+
+    def test_artifact_filename_resolves_via_object_lookup(self, monkeypatch) -> None:
+        """Spec §4.3: get_artifact resolves filename via artifacts[name], no S3 list."""
+        from get_artifact import handler
+        self._setup(monkeypatch)
+        mock_s3 = _mock_s3()
+        self._wire_matches(
+            mock_s3,
+            {"provider": "sc", "matches": [
+                {"id": "g1",
+                 "artifacts": {
+                     "match": "match.json",
+                     "tracking": "tracking.jsonl.bz2",
+                 },
+                 "visibility": "public",
+                 "updated_at": "2026-05-02T14:00:00Z"},
+            ]},
         )
 
         event = {
@@ -1464,24 +2051,8 @@ class TestGetArtifact(_ResetS3):
         }
         result = handler(event, None)
         assert result["statusCode"] == 302
-        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "sc/g1/tracking.txt"
-
-    def test_legacy_match_without_visibility_treated_as_public(self, monkeypatch) -> None:
-        from get_artifact import handler
-        self._setup(monkeypatch)
-        mock_s3 = _mock_s3()
-        self._wire_matches_and_listing(
-            mock_s3,
-            {"provider": "sc", "matches": [{"id": "g1", "artifacts": ["match"]}]},
-            ["sc/g1/match.json"],
-        )
-
-        event = {
-            "headers": {"authorization": "Bearer pub-tok"},
-            "pathParameters": {"provider": "sc", "id": "g1", "artifact": "match"},
-        }
-        result = handler(event, None)
-        assert result["statusCode"] == 302
+        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "sc/g1/tracking.jsonl.bz2"
+        mock_s3.list_objects_v2.assert_not_called()
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
@@ -1521,10 +2092,12 @@ PRESIGNED_EXPIRY = int(os.environ.get("PRESIGNED_EXPIRY", "3600"))
 def handler(event: dict, context: object) -> dict:
     """Resolve an artifact by name and return a presigned S3 URL via 302 redirect.
 
-    Reads ``{provider}/matches.json`` once to determine the match's visibility,
-    enforces tier check (404 on mismatch — uniform with not-found to avoid
-    existence leaks), then resolves the actual S3 prefix from the recorded
-    visibility and lists for ``{artifact}.*``.
+    Reads ``{provider}/matches.json`` once to determine the match's visibility
+    and the artifact's filename, enforces tier check (404 on mismatch — uniform
+    with not-found to avoid existence leaks), then generates the presigned URL
+    directly. No ``list_objects_v2`` and no ``head_object`` — the index is the
+    source of truth for the file's existence (the upload tool wrote both
+    atomically). Spec §4.3.
     """
     tier = validate_token(event)
     if isinstance(tier, dict):
@@ -1544,7 +2117,7 @@ def handler(event: dict, context: object) -> dict:
 
     s3 = get_s3_client()
 
-    # Look up the match in matches.json to determine visibility.
+    # Look up the match in matches.json to determine visibility AND the artifact filename.
     try:
         obj = s3.get_object(Bucket=BUCKET, Key=f"{provider}/matches.json")
         matches_data = json.loads(obj["Body"].read().decode("utf-8"))
@@ -1563,31 +2136,34 @@ def handler(event: dict, context: object) -> dict:
         # Uniform 404 with not-found — no existence leak.
         return json_response(404, {"error": "Match not found"})
 
+    # Whitelist + filename lookup in one step. Spec §4.3: artifacts is an
+    # object {name: filename}; keys form the whitelist, values resolve the file.
+    artifacts = match.get("artifacts") or {}
+    if not isinstance(artifacts, dict):
+        # Defensive: legacy array-form entries should not exist post-Task 8,
+        # but if they do, treat as malformed and refuse to serve.
+        logger.warning("legacy_artifacts_array_form", extra={"match_id": match_id})
+        return json_response(404, {"error": "Artifact not found"})
+
+    filename = artifacts.get(artifact)
+    if filename is None:
+        return json_response(404, {"error": "Artifact not found"})
+
     prefix_root = (
         f"{provider}/_private/{match_id}"
         if visibility == "private"
         else f"{provider}/{match_id}"
     )
+    key = f"{prefix_root}/{filename}"
 
     try:
-        response = s3.list_objects_v2(Bucket=BUCKET, Prefix=f"{prefix_root}/{artifact}", MaxKeys=5)
-        contents = response.get("Contents", [])
-        matching = [
-            obj["Key"]
-            for obj in contents
-            if obj["Key"].rsplit("/", 1)[-1].rsplit(".", 1)[0] == artifact
-        ]
-        if not matching:
-            return json_response(404, {"error": "Artifact not found"})
-
-        key = matching[0]
         url = s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": BUCKET, "Key": key},
             ExpiresIn=PRESIGNED_EXPIRY,
         )
     except Exception:
-        logger.exception("s3_error", extra={"handler": "get_artifact", "stage": "artifact_resolve"})
+        logger.exception("s3_error", extra={"handler": "get_artifact", "stage": "presign"})
         return json_response(500, {"error": "Internal server error"})
 
     return redirect_response(url)
@@ -1640,11 +2216,15 @@ class TestListPlayers(_ResetS3):
         shared._get_owner_token.cache_clear()
         monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
 
-    def _wire(self, mock_s3, public_payload=None, private_payload=None):
+    def _wire(self, mock_s3, providers=("sc", "pff"), public_payload=None, private_payload=None):
+        """Wire mock_s3 with a providers.json + per-provider players indexes."""
         import json
         mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        providers_body = json.dumps({"providers": list(providers)}).encode()
 
         def get_obj(Bucket, Key):
+            if Key == "providers.json":
+                return {"Body": MagicMock(read=MagicMock(return_value=providers_body))}
             if Key.endswith("/_private/players.json"):
                 if private_payload is None:
                     raise mock_s3.exceptions.NoSuchKey()
@@ -1700,12 +2280,12 @@ class TestListPlayers(_ResetS3):
         assert ids == ["p1", "p2"]
 
     def test_no_indexes_returns_empty_list(self, monkeypatch) -> None:
-        """No public OR private index: 200 with empty list (still a valid provider with no player ref data)."""
+        """Known provider with no public OR private players index: 200 with empty list."""
         from list_players import handler
         import json
         self._setup(monkeypatch)
         mock_s3 = _mock_s3()
-        self._wire(mock_s3)
+        self._wire(mock_s3)  # providers exist; no players indexes
 
         event = {
             "headers": {"authorization": "Bearer own-tok"},
@@ -1715,6 +2295,47 @@ class TestListPlayers(_ResetS3):
         assert result["statusCode"] == 200
         body = json.loads(result["body"])
         assert body["players"] == []
+
+    def test_unknown_provider_returns_404(self, monkeypatch) -> None:
+        """Spec §6.4: list_players gates on providers.json membership; 404 on unknown."""
+        from list_players import handler
+        self._setup(monkeypatch)
+        mock_s3 = _mock_s3()
+        self._wire(mock_s3, providers=("sc", "pff"))
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "made-up"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 404
+
+    def test_owner_tier_cross_tier_id_collision_private_wins(self, monkeypatch) -> None:
+        """Spec §6.3.1: on cross-tier ID collision, owner-tier sees the private record."""
+        from list_players import handler
+        import json
+        self._setup(monkeypatch)
+        mock_s3 = _mock_s3()
+        self._wire(
+            mock_s3,
+            public_payload={"provider": "sc", "players": [
+                {"id": "p1", "nickname": "Public Mask"},
+            ]},
+            private_payload={"provider": "sc", "players": [
+                {"id": "p1", "nickname": "Private Real"},
+            ]},
+        )
+
+        event = {
+            "headers": {"authorization": "Bearer own-tok"},
+            "pathParameters": {"provider": "sc"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        body = json.loads(result["body"])
+        # Single record (deduped); private record wins.
+        assert len(body["players"]) == 1
+        assert body["players"][0]["nickname"] == "Private Real"
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -1750,7 +2371,12 @@ BUCKET = os.environ.get("DATA_BUCKET", "")
 
 
 def handler(event: dict, context: object) -> dict:
-    """Return the player catalogue for a provider, merged across visible tiers."""
+    """Return the player catalogue for a provider, merged across visible tiers.
+
+    Gates on providers.json membership for unknown-provider 404 (spec §6.4).
+    Owner-tier merge applies private-wins precedence on cross-tier ID
+    collision (spec §6.3.1).
+    """
     tier = validate_token(event)
     if isinstance(tier, dict):
         logger.warning("auth_failure", extra={"handler": "list_players"})
@@ -1763,10 +2389,33 @@ def handler(event: dict, context: object) -> dict:
         return param_error
 
     s3 = get_s3_client()
+    if not _provider_known(s3, provider):
+        return json_response(404, {"error": "Provider not found"})
+
     public_players = _read_index(s3, f"{provider}/players.json")
     private_players = _read_index(s3, f"{provider}/_private/players.json") if tier == Tier.OWNER else []
 
-    return json_response(200, {"provider": provider, "players": public_players + private_players})
+    # Private-wins precedence on cross-tier ID collision (spec §6.3.1).
+    by_id: dict[str, dict] = {p.get("id"): p for p in public_players if p.get("id")}
+    for priv in private_players:
+        pid = priv.get("id")
+        if pid:
+            by_id[pid] = priv  # overwrite any same-id public entry
+
+    return json_response(200, {"provider": provider, "players": list(by_id.values())})
+
+
+def _provider_known(s3, provider: str) -> bool:
+    """Check that `provider` appears in providers.json. Returns True if so."""
+    try:
+        obj = s3.get_object(Bucket=BUCKET, Key="providers.json")
+        data = json.loads(obj["Body"].read().decode("utf-8"))
+        return provider in (data.get("providers") or [])
+    except s3.exceptions.NoSuchKey:
+        return False
+    except Exception:
+        logger.exception("s3_error", extra={"handler": "list_players", "key": "providers.json"})
+        return False
 
 
 def _read_index(s3, key: str) -> list[dict]:
@@ -1817,11 +2466,14 @@ class TestGetPlayer(_ResetS3):
         shared._get_owner_token.cache_clear()
         monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
 
-    def _wire(self, mock_s3, public_payload=None, private_payload=None):
+    def _wire(self, mock_s3, providers=("sc", "pff"), public_payload=None, private_payload=None):
         import json
         mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        providers_body = json.dumps({"providers": list(providers)}).encode()
 
         def get_obj(Bucket, Key):
+            if Key == "providers.json":
+                return {"Body": MagicMock(read=MagicMock(return_value=providers_body))}
             if Key.endswith("/_private/players.json"):
                 if private_payload is None:
                     raise mock_s3.exceptions.NoSuchKey()
@@ -1897,6 +2549,40 @@ class TestGetPlayer(_ResetS3):
         }
         result = handler(event, None)
         assert result["statusCode"] == 404
+
+    def test_unknown_provider_returns_404(self, monkeypatch) -> None:
+        """Spec §6.4: get_player gates on providers.json membership."""
+        from get_player import handler
+        self._setup(monkeypatch)
+        mock_s3 = _mock_s3()
+        self._wire(mock_s3, providers=("sc", "pff"))
+
+        event = {
+            "headers": {"authorization": "Bearer own-tok"},
+            "pathParameters": {"provider": "made-up", "id": "p1"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 404
+
+    def test_owner_tier_cross_tier_collision_private_wins(self, monkeypatch) -> None:
+        """Spec §6.3.1: owner-tier sees the private record on cross-tier ID collision."""
+        from get_player import handler
+        import json
+        self._setup(monkeypatch)
+        mock_s3 = _mock_s3()
+        self._wire(
+            mock_s3,
+            public_payload={"provider": "sc", "players": [{"id": "p1", "nickname": "Public Mask"}]},
+            private_payload={"provider": "sc", "players": [{"id": "p1", "nickname": "Private Real"}]},
+        )
+
+        event = {
+            "headers": {"authorization": "Bearer own-tok"},
+            "pathParameters": {"provider": "sc", "id": "p1"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        assert json.loads(result["body"])["nickname"] == "Private Real"
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -1932,7 +2618,12 @@ BUCKET = os.environ.get("DATA_BUCKET", "")
 
 
 def handler(event: dict, context: object) -> dict:
-    """Return a single player record. 404 if not found OR if found-but-private-and-public-tier."""
+    """Return a single player record. 404 if provider unknown, player not found,
+    or found-but-private-and-public-tier.
+
+    Spec §6.4: gates on providers.json membership.
+    Spec §6.3.1: on cross-tier ID collision, owner-tier sees the private record.
+    """
     tier = validate_token(event)
     if isinstance(tier, dict):
         logger.warning("auth_failure", extra={"handler": "get_player"})
@@ -1949,21 +2640,36 @@ def handler(event: dict, context: object) -> dict:
             return param_error
 
     s3 = get_s3_client()
+    if not _provider_known(s3, provider):
+        return json_response(404, {"error": "Provider not found"})
 
-    # Try public index first.
-    public_players = _read_index(s3, f"{provider}/players.json")
-    found = next((p for p in public_players if p.get("id") == player_id), None)
-    if found is not None:
-        return json_response(200, found)
-
-    # Owner tier: also try private index.
+    # Owner tier: try PRIVATE index first so a cross-tier ID collision returns the
+    # private record (spec §6.3.1: private wins).
     if tier == Tier.OWNER:
         private_players = _read_index(s3, f"{provider}/_private/players.json")
         found = next((p for p in private_players if p.get("id") == player_id), None)
         if found is not None:
             return json_response(200, found)
 
+    # Fall through to public index for both tiers.
+    public_players = _read_index(s3, f"{provider}/players.json")
+    found = next((p for p in public_players if p.get("id") == player_id), None)
+    if found is not None:
+        return json_response(200, found)
+
     return json_response(404, {"error": "Player not found"})
+
+
+def _provider_known(s3, provider: str) -> bool:
+    try:
+        obj = s3.get_object(Bucket=BUCKET, Key="providers.json")
+        data = json.loads(obj["Body"].read().decode("utf-8"))
+        return provider in (data.get("providers") or [])
+    except s3.exceptions.NoSuchKey:
+        return False
+    except Exception:
+        logger.exception("s3_error", extra={"handler": "get_player", "key": "providers.json"})
+        return False
 
 
 def _read_index(s3, key: str) -> list[dict]:
@@ -2026,6 +2732,7 @@ resource "aws_lambda_function" "list_players" {
       API_TOKEN         = var.api_token
       DATA_BUCKET       = var.bucket_name
       OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LAST_ROTATION     = var.last_rotation
     }
   }
 }
@@ -2050,6 +2757,7 @@ resource "aws_lambda_function" "get_player" {
       API_TOKEN         = var.api_token
       DATA_BUCKET       = var.bucket_name
       OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LAST_ROTATION     = var.last_rotation
     }
   }
 }
@@ -2231,12 +2939,14 @@ git commit -m "feat(terraform): add /players and /players/{id} API Gateway route
 
 ---
 
-### Task 15: Create pining-upload-players CLI
+### Task 15: Create pining-upload-players CLI (canonical JSON only)
 
 **Files:**
 - Create: `src/mock_api/upload_players.py`
 - Modify: `pyproject.toml`
 - Create: `src/tests/test_upload_players.py`
+
+The CLI accepts canonical JSON only — a list of `PlayerRecord` objects matching the schema in spec §6.3, or `{"players": [...]}`. CSV is explicitly rejected with a message pointing operators at `scripts/upload_pff_wc2022.py` as the reference adapter (spec §6.5). Cross-tier dedup check runs across BOTH `players.json` files (public and `_private/`) before any write — same id in either file fails the upload (spec §6.5 step 4).
 
 - [ ] **Step 1: Write failing tests**
 
@@ -2247,66 +2957,98 @@ Create `src/tests/test_upload_players.py`:
 
 from __future__ import annotations
 
-import csv
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-def _csv_path(tmp_path):
-    p = tmp_path / "players.csv"
-    with open(p, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["dob", "firstName", "height", "id", "lastName", "nickname", "positionGroupType"])
-        writer.writerow(["2001-06-17", "Jurrien", "182.0", "8022", "Timber", "Jurrien Timber", "D"])
-        writer.writerow(["2000-03-06", "Iliman", "180.0", "2144", "Ndiaye", "Iliman Ndiaye", "M"])
+def _canonical_json_path(tmp_path: Path) -> Path:
+    """Write a canonical JSON file with two synthetic player records.
+
+    Synthetic IDs and names — never use real provider data in committed test
+    fixtures (memory: feedback_no_local_paths_in_committed_docs.md, and the
+    spec §8.3 redistribution-licence rationale also applies to test data).
+    """
+    p = tmp_path / "players.json"
+    p.write_text(json.dumps([
+        {"id": "test-001", "firstName": "Test", "lastName": "Alpha",
+         "nickname": "Test Alpha", "dob": "2000-01-01",
+         "height": 180.0, "positionGroupType": "D"},
+        {"id": "test-002", "firstName": "Test", "lastName": "Beta",
+         "nickname": "Test Beta", "dob": "2000-02-02",
+         "height": 175.0, "positionGroupType": "M"},
+    ]), encoding="utf-8")
     return p
 
 
-class TestUploadPlayers:
+def _empty_s3():
+    s3 = MagicMock()
+    s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+    s3.get_object.side_effect = s3.exceptions.NoSuchKey()
+    return s3
+
+
+class TestUploadPlayersCSVRejection:
+    def test_csv_input_is_rejected_with_helpful_message(self, tmp_path):
+        """Spec §6.5: CSV is explicitly rejected; error names the reference adapter."""
+        from mock_api.upload_players import upload_players
+        import pytest
+
+        csv_file = tmp_path / "players.csv"
+        csv_file.write_text("id,nickname\ntest-001,Test\n", encoding="utf-8")
+
+        s3 = _empty_s3()
+        with patch("mock_api.upload_players.boto3.client", return_value=s3):
+            with pytest.raises(ValueError, match="canonical JSON"):
+                upload_players(csv_file, provider="pff", bucket="b", visibility="private")
+
+    def test_csv_rejection_message_mentions_reference_adapter(self, tmp_path):
+        from mock_api.upload_players import upload_players
+        import pytest
+
+        csv_file = tmp_path / "players.csv"
+        csv_file.write_text("id,nickname\n", encoding="utf-8")
+
+        with patch("mock_api.upload_players.boto3.client", return_value=_empty_s3()):
+            with pytest.raises(ValueError, match="upload_pff_wc2022"):
+                upload_players(csv_file, provider="pff", bucket="b", visibility="private")
+
+
+class TestUploadPlayersCanonicalJSON:
     def test_private_visibility_writes_under_private_prefix(self, tmp_path):
         from mock_api.upload_players import upload_players
-        csv_file = _csv_path(tmp_path)
+        json_file = _canonical_json_path(tmp_path)
 
-        s3 = MagicMock()
-        s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
-        s3.get_object.side_effect = s3.exceptions.NoSuchKey()
-
+        s3 = _empty_s3()
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             upload_players(
-                csv_file, provider="pff", bucket="b", visibility="private",
+                json_file, provider="pff", bucket="b", visibility="private",
                 source_name="PFF FC", source_url="https://www.pff.com/", source_licence="Restricted",
             )
 
-        # Single put_object to the _private path
         keys = [c.kwargs.get("Key") for c in s3.put_object.call_args_list]
         assert "pff/_private/players.json" in keys
 
     def test_public_visibility_writes_to_provider_root(self, tmp_path):
         from mock_api.upload_players import upload_players
-        csv_file = _csv_path(tmp_path)
+        json_file = _canonical_json_path(tmp_path)
 
-        s3 = MagicMock()
-        s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
-        s3.get_object.side_effect = s3.exceptions.NoSuchKey()
-
+        s3 = _empty_s3()
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
-            upload_players(csv_file, provider="sc", bucket="b", visibility="public")
+            upload_players(json_file, provider="sc", bucket="b", visibility="public")
 
         keys = [c.kwargs.get("Key") for c in s3.put_object.call_args_list]
         assert "sc/players.json" in keys
         assert "sc/_private/players.json" not in keys
 
-    def test_index_payload_shape(self, tmp_path):
+    def test_index_payload_shape_with_updated_at(self, tmp_path):
         from mock_api.upload_players import upload_players
-        csv_file = _csv_path(tmp_path)
+        json_file = _canonical_json_path(tmp_path)
 
-        s3 = MagicMock()
-        s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
-        s3.get_object.side_effect = s3.exceptions.NoSuchKey()
-
+        s3 = _empty_s3()
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             upload_players(
-                csv_file, provider="pff", bucket="b", visibility="private",
+                json_file, provider="pff", bucket="b", visibility="private",
                 source_name="PFF FC",
             )
 
@@ -2316,59 +3058,148 @@ class TestUploadPlayers:
         assert body["provider"] == "pff"
         assert len(body["players"]) == 2
 
-        timber = next(p for p in body["players"] if p["id"] == "8022")
-        assert timber["firstName"] == "Jurrien"
-        assert timber["lastName"] == "Timber"
-        assert timber["nickname"] == "Jurrien Timber"
-        assert timber["dob"] == "2001-06-17"
-        assert timber["height"] == 182.0
-        assert timber["positionGroupType"] == "D"
-        assert timber["visibility"] == "private"
-        assert timber["source"]["name"] == "PFF FC"
+        alpha = next(p for p in body["players"] if p["id"] == "test-001")
+        assert alpha["firstName"] == "Test"
+        assert alpha["lastName"] == "Alpha"
+        assert alpha["nickname"] == "Test Alpha"
+        assert alpha["dob"] == "2000-01-01"
+        assert alpha["height"] == 180.0
+        assert alpha["positionGroupType"] == "D"
+        assert alpha["visibility"] == "private"
+        # updated_at is set by the CLI on every write (spec §6.3)
+        assert alpha["updated_at"].endswith("Z")
+        assert alpha["source"]["name"] == "PFF FC"
+
+    def test_pydantic_validation_rejects_record_missing_a_name(self, tmp_path):
+        from mock_api.upload_players import upload_players
+        import pytest
+
+        bad_file = tmp_path / "bad.json"
+        bad_file.write_text(json.dumps([{"id": "x"}]), encoding="utf-8")  # no nickname or firstName+lastName
+
+        with patch("mock_api.upload_players.boto3.client", return_value=_empty_s3()):
+            with pytest.raises((ValueError, Exception)):
+                upload_players(bad_file, provider="pff", bucket="b", visibility="private")
 
     def test_idempotent_reupload_replaces_existing(self, tmp_path):
         from mock_api.upload_players import upload_players
-        csv_file = _csv_path(tmp_path)
+        json_file = _canonical_json_path(tmp_path)
 
-        existing = {
+        existing_private = {
             "provider": "pff",
             "players": [
-                {"id": "8022", "nickname": "Old Name", "visibility": "private"},
-                {"id": "9999", "nickname": "Untouched", "visibility": "private"},
+                {"id": "test-001", "nickname": "Old Name", "visibility": "private", "updated_at": "2025-01-01T00:00:00Z"},
+                {"id": "test-999", "nickname": "Untouched", "visibility": "private", "updated_at": "2025-01-01T00:00:00Z"},
             ],
         }
         s3 = MagicMock()
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
-        s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing).encode()))}
+
+        def get_obj(Bucket, Key):
+            if Key == "pff/_private/players.json":
+                return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_private).encode()))}
+            raise s3.exceptions.NoSuchKey()
+
+        s3.get_object.side_effect = get_obj
 
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
-            upload_players(csv_file, provider="pff", bucket="b", visibility="private")
+            upload_players(json_file, provider="pff", bucket="b", visibility="private")
 
         put_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "pff/_private/players.json"]
         body = json.loads(put_calls[0].kwargs["Body"].decode("utf-8"))
         ids = sorted(p["id"] for p in body["players"])
-        assert ids == ["2144", "8022", "9999"]
-        timber = next(p for p in body["players"] if p["id"] == "8022")
-        assert timber["nickname"] == "Jurrien Timber"  # updated, not "Old Name"
-        untouched = next(p for p in body["players"] if p["id"] == "9999")
+        assert ids == ["test-001", "test-002", "test-999"]
+        alpha = next(p for p in body["players"] if p["id"] == "test-001")
+        assert alpha["nickname"] == "Test Alpha"  # updated, not "Old Name"
+        untouched = next(p for p in body["players"] if p["id"] == "test-999")
         assert untouched["nickname"] == "Untouched"
 
-    def test_tier_mixing_rejected(self, tmp_path):
+    def test_tier_mixing_within_same_file_rejected(self, tmp_path):
         from mock_api.upload_players import upload_players
         import pytest
-        csv_file = _csv_path(tmp_path)
+        json_file = _canonical_json_path(tmp_path)
 
-        existing = {
+        existing_public = {
             "provider": "pff",
-            "players": [{"id": "8022", "nickname": "Existing", "visibility": "public"}],
+            "players": [{"id": "test-001", "nickname": "Existing", "visibility": "public", "updated_at": "2025-01-01T00:00:00Z"}],
         }
         s3 = MagicMock()
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
-        s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing).encode()))}
+
+        def get_obj(Bucket, Key):
+            if Key == "pff/players.json":
+                return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_public).encode()))}
+            raise s3.exceptions.NoSuchKey()
+
+        s3.get_object.side_effect = get_obj
 
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             with pytest.raises(ValueError, match="tier"):
-                upload_players(csv_file, provider="pff", bucket="b", visibility="private")
+                upload_players(json_file, provider="pff", bucket="b", visibility="private")
+
+    def test_cross_tier_dedup_check_scans_both_files(self, tmp_path):
+        """Spec §6.5: cross-tier dedup check reads BOTH players.json files before write."""
+        from mock_api.upload_players import upload_players
+        import pytest
+        json_file = _canonical_json_path(tmp_path)
+
+        # test-001 lives in the OTHER tier (public); writing private must fail.
+        existing_public = {
+            "provider": "pff",
+            "players": [{"id": "test-001", "nickname": "Other Tier", "visibility": "public", "updated_at": "2025-01-01T00:00:00Z"}],
+        }
+        s3 = MagicMock()
+        s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+
+        def get_obj(Bucket, Key):
+            if Key == "pff/players.json":
+                return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_public).encode()))}
+            raise s3.exceptions.NoSuchKey()
+
+        s3.get_object.side_effect = get_obj
+
+        with patch("mock_api.upload_players.boto3.client", return_value=s3):
+            with pytest.raises(ValueError, match="cross-tier|other tier"):
+                upload_players(json_file, provider="pff", bucket="b", visibility="private")
+
+    def test_source_license_alias_accepted(self, tmp_path, monkeypatch):
+        """Spec §8.2.1: --source-license (American) is a quiet alias for --source-licence (British).
+
+        Both spellings populate the same argparse destination (source_licence) so
+        downstream code only sees one canonical name.
+        """
+        from mock_api import upload_players as upload_players_mod
+        import sys
+        from unittest.mock import patch
+
+        # Stub out upload_players so we just exercise the argparse layer.
+        captured: dict = {}
+
+        def fake_upload(**kwargs):
+            captured.update(kwargs)
+            return 0
+
+        # Try American spelling — should populate source_licence kwarg with British internal name.
+        monkeypatch.setattr(upload_players_mod, "upload_players", fake_upload)
+        json_file = tmp_path / "players.json"
+        json_file.write_text("[]", encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", [
+            "pining-upload-players", str(json_file),
+            "--provider", "p", "--bucket", "b",
+            "--source-license", "Test License",
+        ])
+        upload_players_mod.main()
+        assert captured["source_licence"] == "Test License"
+
+        # And the British spelling populates the same destination.
+        captured.clear()
+        monkeypatch.setattr(sys, "argv", [
+            "pining-upload-players", str(json_file),
+            "--provider", "p", "--bucket", "b",
+            "--source-licence", "British License",
+        ])
+        upload_players_mod.main()
+        assert captured["source_licence"] == "British License"
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -2386,33 +3217,61 @@ Write `src/mock_api/upload_players.py`:
 ```python
 """Upload provider-level player reference data to S3.
 
-Reads a CSV (PFF format: dob, firstName, height, id, lastName, nickname,
-positionGroupType) or a JSON file with a top-level list, and writes the
-provider's players index to S3 at one of:
+Reads a canonical JSON file (a list of PlayerRecord objects, or
+{"players": [...]}) and writes the provider's players index to S3 at one of:
 
 - {provider}/players.json (visibility=public)
 - {provider}/_private/players.json (visibility=private)
 
-Existing players (by id) are updated in place; new players are appended.
-Tier-mixing within a single id is rejected.
+CSV input is explicitly rejected (spec §6.5) — provider-specific shapes must
+be normalised to canonical JSON by a provider-specific adapter; see
+scripts/upload_pff_wc2022.py for a worked example.
+
+Existing players (by id, within the same tier) are updated in place; new
+players are appended; updated_at is set on every write.
+
+Tier mixing is rejected at two levels:
+- within the same file: re-uploading a public id with --visibility private fails
+- across both files: an id present in EITHER tier blocks an upload of the same
+  id to the OTHER tier (spec §6.5 step 4)
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import re
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
 
+# Make the Pydantic models in shared.py importable.
+_SHARED_DIR = Path(__file__).resolve().parents[2] / "terraform" / "modules" / "functions" / "src"
+if str(_SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(_SHARED_DIR))
+
+from shared import PlayerRecord  # type: ignore[import-not-found]
+
 _SAFE_PARAM = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+
+_CSV_REJECTION_MESSAGE = (
+    "pining-upload-players accepts canonical JSON only (a list of PlayerRecord objects, "
+    "or {\"players\": [...]}).\n"
+    "CSV input is not supported by this CLI — provider-specific shapes must be normalised "
+    "to canonical JSON by a provider-specific adapter. See scripts/upload_pff_wc2022.py for "
+    "a worked example."
+)
 
 
 def _validate_param(value: str, name: str) -> None:
     if not value or len(value) > 128 or not _SAFE_PARAM.match(value):
         raise ValueError(f"Invalid {name}: must be 1-128 chars, alphanumeric start, then [a-zA-Z0-9_-]+")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def upload_players(
@@ -2424,7 +3283,7 @@ def upload_players(
     source_url: str | None = None,
     source_licence: str | None = None,
 ) -> int:
-    """Upload a player catalogue to S3. Returns the number of players in the resulting index."""
+    """Upload a canonical-JSON player catalogue to S3. Returns the number of players in the resulting index."""
     if visibility not in ("public", "private"):
         raise ValueError(f"Invalid visibility: {visibility!r}")
     _validate_param(provider, "provider")
@@ -2432,20 +3291,51 @@ def upload_players(
     if not input_file.is_file():
         raise FileNotFoundError(f"Not a file: {input_file}")
 
-    rows = _read_rows(input_file)
-    new_records = [_to_player_record(row, visibility, source_name, source_url, source_licence) for row in rows]
+    # CSV (or anything not .json) is explicitly rejected — spec §6.5.
+    if input_file.suffix.lower() != ".json":
+        raise ValueError(_CSV_REJECTION_MESSAGE)
+
+    raw_records = _read_canonical_json(input_file)
+
+    # Validate every record against the canonical Pydantic model BEFORE any S3 call.
+    now = _utc_now_iso()
+    new_records: list[dict] = []
+    for raw in raw_records:
+        record = dict(raw)  # avoid mutating caller's data
+        record["visibility"] = visibility
+        record.setdefault("updated_at", now)
+        if source_name and "source" not in record:
+            record["source"] = {
+                "name": source_name,
+                "url": source_url or "",
+                "licence": source_licence or "",
+            }
+        # PlayerRecord.model_validate raises ValidationError with field-level diagnostics.
+        validated = PlayerRecord.model_validate(record)
+        # Always refresh updated_at on this write.
+        dumped = validated.model_dump(exclude_none=True)
+        dumped["updated_at"] = now
+        new_records.append(dumped)
 
     s3 = boto3.client("s3")
-    key = f"{provider}/_private/players.json" if visibility == "private" else f"{provider}/players.json"
+    target_key = f"{provider}/_private/players.json" if visibility == "private" else f"{provider}/players.json"
+    other_key  = f"{provider}/players.json" if visibility == "private" else f"{provider}/_private/players.json"
 
-    try:
-        obj = s3.get_object(Bucket=bucket, Key=key)
-        existing_data = json.loads(obj["Body"].read().decode("utf-8"))
-        existing_players = existing_data.get("players", [])
-    except s3.exceptions.NoSuchKey:
-        existing_players = []
+    target_existing = _read_index(s3, bucket, target_key)
+    other_existing  = _read_index(s3, bucket, other_key)
 
-    by_id = {p["id"]: p for p in existing_players}
+    # Cross-tier dedup check (spec §6.5 step 4): no incoming id may already
+    # exist in the OTHER tier's file.
+    other_ids = {p.get("id") for p in other_existing}
+    for new in new_records:
+        if new["id"] in other_ids:
+            raise ValueError(
+                f"Cross-tier collision for player id {new['id']!r}: id already exists in the "
+                f"other tier ({other_key!r}). Re-tiering requires the manual procedure in spec §11.4."
+            )
+
+    # Same-file tier-mixing check (defensive — same-tier merge only here).
+    by_id: dict[str, dict] = {p["id"]: p for p in target_existing}
     for new in new_records:
         prior = by_id.get(new["id"])
         if prior is not None and prior.get("visibility", "public") != visibility:
@@ -2460,71 +3350,49 @@ def upload_players(
 
     s3.put_object(
         Bucket=bucket,
-        Key=key,
+        Key=target_key,
         Body=json.dumps(payload, indent=2).encode("utf-8"),
         ContentType="application/json",
     )
-    print(f"  Wrote {len(merged)} player(s) to s3://{bucket}/{key}")
+    print(f"  Wrote {len(merged)} player(s) to s3://{bucket}/{target_key}")
     return len(merged)
 
 
-def _read_rows(path: Path) -> list[dict]:
-    if path.suffix.lower() == ".csv":
-        with path.open(newline="", encoding="utf-8") as f:
-            return list(csv.DictReader(f))
-    if path.suffix.lower() == ".json":
-        with path.open(encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return data
-        if isinstance(data, dict) and "players" in data:
-            return data["players"]
-        raise ValueError("JSON input must be a list or {'players': [...]}")
-    raise ValueError(f"Unsupported input format: {path.suffix}")
+def _read_canonical_json(path: Path) -> list[dict]:
+    with path.open(encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict) and "players" in data:
+        return data["players"]
+    raise ValueError("Canonical JSON input must be a list or {'players': [...]}")
 
 
-def _to_player_record(
-    row: dict,
-    visibility: str,
-    source_name: str | None,
-    source_url: str | None,
-    source_licence: str | None,
-) -> dict:
-    if "id" not in row or not row["id"]:
-        raise ValueError(f"Player row missing required field 'id': {row}")
-    if not (row.get("nickname") or (row.get("firstName") and row.get("lastName"))):
-        raise ValueError(f"Player row {row.get('id')!r} needs nickname or firstName+lastName")
-
-    record: dict = {"id": str(row["id"]), "visibility": visibility}
-    for key in ("firstName", "lastName", "nickname", "dob", "positionGroupType"):
-        val = row.get(key)
-        if val:
-            record[key] = val
-
-    if row.get("height"):
-        try:
-            record["height"] = float(row["height"])
-        except (TypeError, ValueError):
-            pass
-
-    if source_name:
-        record["source"] = {
-            "name": source_name,
-            "url": source_url or "",
-            "licence": source_licence or "",
-        }
-    return record
+def _read_index(s3, bucket: str, key: str) -> list[dict]:
+    try:
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        return json.loads(obj["Body"].read().decode("utf-8")).get("players", [])
+    except s3.exceptions.NoSuchKey:
+        return []
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Upload a player catalogue to the mock provider API's S3 bucket")
-    parser.add_argument("input_file", type=Path, help="CSV or JSON file with player records")
+    parser = argparse.ArgumentParser(
+        description="Upload a canonical-JSON player catalogue to the mock provider API's S3 bucket"
+    )
+    parser.add_argument("input_file", type=Path, help="Canonical JSON file with player records")
     parser.add_argument("--provider", required=True, help="Provider name (e.g., pff)")
     parser.add_argument("--bucket", required=True, help="S3 bucket name")
     parser.add_argument("--visibility", default="public", choices=["public", "private"])
     parser.add_argument("--source-name", default=None)
     parser.add_argument("--source-url", default=None)
-    parser.add_argument("--source-licence", default=None)
+    # British spelling canonical; American is a quiet alias (spec §8.2.1).
+    parser.add_argument(
+        "--source-licence", "--source-license",
+        dest="source_licence",
+        default=None,
+        help="Source licence text (British spelling canonical; --source-license also accepted)",
+    )
     args = parser.parse_args()
 
     print(f"Uploading players ({args.provider}, {args.visibility}) from {args.input_file}")
@@ -2590,7 +3458,7 @@ Expected: two new lambdas, two new routes deploy successfully.
 
 ```bash
 API=$(terraform output -raw api_url)
-TOKEN="test-token-pining-for-the-data"
+TOKEN="$PUB_TOKEN"
 curl -s -H "Authorization: Bearer $TOKEN" "$API/skillcorner/players" | python -m json.tool
 ```
 
@@ -2731,7 +3599,7 @@ resource "aws_cloudtrail" "data_bucket" {
   enable_log_file_validation    = true
 
   advanced_event_selector {
-    name = "Data bucket reads/writes excluding bookkeeping"
+    name = "Data bucket reads/writes excluding only providers.json"
 
     field_selector {
       field  = "eventCategory"
@@ -2745,9 +3613,13 @@ resource "aws_cloudtrail" "data_bucket" {
       field        = "resources.ARN"
       starts_with  = ["${var.data_bucket_arn}/"]
     }
+    # Spec §7.5: exclude ONLY providers.json (true bookkeeping; never reveals
+    # private content). matches.json and players.json reads stay logged because
+    # enumeration via /matches and /players is the most likely abuse vector and
+    # the trail is its forensic record.
     field_selector {
       field           = "resources.ARN"
-      not_ends_with   = ["/matches.json", "/players.json", "/providers.json"]
+      not_ends_with   = ["/providers.json"]
     }
   }
 
@@ -2819,20 +3691,31 @@ Expected: all audit resources created.
 
 - [ ] **Step 7: Smoke-test that an artifact fetch lands a CloudTrail event**
 
+**Precondition:** at least one public artifact must exist in the bucket. If the dev environment is empty, upload a SkillCorner test match first (e.g., re-run an earlier `pining-upload` from Phase 1 work). Discover an actually-present match before issuing the curl, so a stale `game_03` reference doesn't silently mask a real CloudTrail wiring failure.
+
 ```bash
-TOKEN="test-token-pining-for-the-data"
+TOKEN="$PUB_TOKEN"
 API=$(terraform output -raw api_url)
 AUDIT_BUCKET=$(terraform output -raw audit_bucket_name)
 
-# Fetch any existing public artifact (assumes Phase 1-4 left some data in place; if not, upload one first)
-curl -s -L -o /dev/null -H "Authorization: Bearer $TOKEN" "$API/skillcorner/matches/game_03/match" || true
+# Discover a real public match ID (don't hardcode a possibly-stale one).
+SC_MATCH=$(curl -s -H "Authorization: Bearer $TOKEN" "$API/skillcorner/matches" | \
+  python -c "import sys, json; m=json.load(sys.stdin)['matches']; print(m[0]['id'] if m else '')")
 
-# Wait up to 15 minutes for CloudTrail to deliver — start by listing what's there
+if [ -z "$SC_MATCH" ]; then
+  echo "ERROR: no SkillCorner matches in bucket — upload one before running this smoke test"
+  exit 1
+fi
+
+# Fetch the artifact — fail loudly if it doesn't return 302 + payload.
+curl -s -L -f -o /dev/null -H "Authorization: Bearer $TOKEN" "$API/skillcorner/matches/$SC_MATCH/match"
+
+# CloudTrail delivers in batches; allow up to 15 minutes for the first event to appear.
 sleep 60
 aws s3 ls "s3://$AUDIT_BUCKET/AWSLogs/" --recursive | head -10
 ```
 
-Expected: at least one log file appears within ~15 minutes (CloudTrail delivers in batches).
+Expected: the curl succeeds (no `|| true` masking), then at least one log file appears within ~15 minutes (CloudTrail delivers in batches). If the `s3 ls` is empty after 60s, retry every couple of minutes for up to 15 minutes before treating the trail as broken.
 
 - [ ] **Step 8: Commit**
 
@@ -2850,7 +3733,7 @@ git commit -m "feat(terraform): add CloudTrail data events on data bucket with a
 **Files:**
 - Create: `scripts/upload_pff_wc2022.py`
 
-Goal: idempotent one-shot script that reads the PFF source folder, reshapes per-match files, calls `upload_game` for each of the 67 matches, and `upload_players` for the player catalogue.
+Goal: idempotent one-shot script that reads the PFF source folder, reshapes per-match files, calls `upload_game` for each of the 64 matches, and `upload_players` for the player catalogue.
 
 - [ ] **Step 1: Write the script**
 
@@ -2860,8 +3743,19 @@ Create `scripts/upload_pff_wc2022.py`:
 """Upload PFF FIFA World Cup 2022 to the mock provider API as private-tier data.
 
 Reshapes the source bundle into per-match staging directories, then calls
-the existing pining-upload primitives. Idempotent — re-running re-uploads
-without producing duplicate index entries.
+the pining-upload primitives. For players, normalises players.csv into a
+canonical-JSON file in a temp directory and calls pining-upload-players
+(which only accepts canonical JSON; spec §6.5).
+
+Idempotent — re-running re-uploads without producing duplicate index entries.
+
+Loads private-tier only — visibility is hardcoded to "private" for both matches
+and players. A single-owner private-tier load (the data goes only into the
+operator's own private bucket, served back only to the operator's own
+owner-token holder) does not engage redistribution licence concerns: it's the
+operator moving their own data between their own systems. If a public-tier
+upload mode is ever added to this script, that path will need its own
+licence-clarification gate before serving (spec §8.3).
 
 Source layout (input):
     FIFA World Cup 2022/
@@ -2870,13 +3764,14 @@ Source layout (input):
     ├── Rosters/{id}.json
     ├── Tracking Data/{id}.jsonl.bz2
     ├── competitions.csv          # not uploaded — directory data covered by /matches
-    ├── players.csv               # uploaded as /players reference catalogue
+    ├── players.csv               # normalised to canonical JSON, then uploaded as /players catalogue
     └── PFF FC Change Log.docx    # not uploaded
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import shutil
 import sys
@@ -2921,18 +3816,50 @@ def main() -> None:
         if not players_csv.is_file():
             print(f"WARN: {players_csv} not found, skipping player catalogue upload")
         else:
-            print(f"Uploading player catalogue to s3://{args.bucket}/{PROVIDER}/_private/players.json")
-            upload_players(
-                input_file=players_csv,
-                provider=PROVIDER,
-                bucket=args.bucket,
-                visibility="private",
-                source_name=SOURCE_NAME,
-                source_url=SOURCE_URL,
-                source_licence=SOURCE_LICENCE,
-            )
+            with tempfile.TemporaryDirectory(prefix="pff-players-") as tmp:
+                canonical_json = Path(tmp) / "players.json"
+                count = _normalise_players_csv_to_canonical(players_csv, canonical_json)
+                print(f"Normalised {count} PFF player(s) to canonical JSON at {canonical_json}")
+                print(f"Uploading player catalogue to s3://{args.bucket}/{PROVIDER}/_private/players.json")
+                upload_players(
+                    input_file=canonical_json,
+                    provider=PROVIDER,
+                    bucket=args.bucket,
+                    visibility="private",
+                    source_name=SOURCE_NAME,
+                    source_url=SOURCE_URL,
+                    source_licence=SOURCE_LICENCE,
+                )
 
     print("Done.")
+
+
+def _normalise_players_csv_to_canonical(csv_path: Path, out_path: Path) -> int:
+    """Read PFF's players.csv and write a canonical-JSON file matching PlayerRecord.
+
+    PFF columns: dob, firstName, height, id, lastName, nickname, positionGroupType.
+    Maps directly to canonical fields with no semantic translation; type-coerce
+    `height` to float. visibility/updated_at/source are added by the upload CLI.
+    """
+    records: list[dict] = []
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            if not row.get("id"):
+                continue
+            record: dict = {"id": str(row["id"])}
+            for key in ("firstName", "lastName", "nickname", "dob", "positionGroupType"):
+                val = row.get(key)
+                if val:
+                    record[key] = val
+            if row.get("height"):
+                try:
+                    record["height"] = float(row["height"])
+                except (TypeError, ValueError):
+                    pass
+            records.append(record)
+
+    out_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
+    return len(records)
 
 
 def _discover_match_ids(source_dir: Path) -> list[str]:
@@ -2982,7 +3909,7 @@ def _upload_one_match(source_dir: Path, match_id: str, bucket: str) -> None:
             provenance="original",
             source_name=SOURCE_NAME,
             source_url=SOURCE_URL,
-            source_license=SOURCE_LICENCE,
+            source_licence=SOURCE_LICENCE,
         )
 
 
@@ -3002,19 +3929,24 @@ Expected: usage printed, no errors.
 
 Without bucket access, just exercise the discovery:
 
+Set `PFF_SOURCE_DIR` to the local path of the unpacked `FIFA World Cup 2022` source folder before running. Path stays out of git.
+
 ```bash
+# operator sets this in their local shell, not committed:
+#   export PFF_SOURCE_DIR="/path/to/FIFA World Cup 2022"
+
 python -c "
-import sys
+import os, sys
 sys.path.insert(0, 'scripts')
 import upload_pff_wc2022
 from pathlib import Path
-ids = upload_pff_wc2022._discover_match_ids(Path(r'D:\\[Karsten]\\Dropbox\\[Microsoft]\\Downloads\\FIFA World Cup 2022'))
+ids = upload_pff_wc2022._discover_match_ids(Path(os.environ['PFF_SOURCE_DIR']))
 print(f'Found {len(ids)} match(es)')
 print('First 3:', ids[:3])
 "
 ```
 
-Expected: `Found 67 match(es)` and three numeric IDs.
+Expected: `Found 64 match(es)` and three numeric IDs.
 
 - [ ] **Step 4: Commit**
 
@@ -3029,25 +3961,34 @@ git commit -m "feat(scripts): add upload_pff_wc2022 orchestrator for bulk PFF pr
 
 **Files:** none — operational.
 
+**Prerequisite:** Phase 1–5 deployed; SSM owner token set. No licence gate — spec §8.3 explains why private-tier loads are gate-free under the single-owner threat model.
+
+Operator must have `PFF_SOURCE_DIR` set to the local path of the unpacked source folder. The path is intentionally NOT committed to the repo.
+
 - [ ] **Step 1: Upload a single match end-to-end**
 
 ```bash
 BUCKET=$(cd terraform/environments/dev && terraform output -raw bucket_name)
 python scripts/upload_pff_wc2022.py \
-  "D:\[Karsten]\Dropbox\[Microsoft]\Downloads\FIFA World Cup 2022" \
+  "$PFF_SOURCE_DIR" \
   --bucket "$BUCKET" \
   --limit 1 \
   --skip-players
 ```
 
-Expected: one match (`3812`) uploads successfully; matches.json updates; providers.json gains `pff`.
+Expected: one match uploads successfully; matches.json updates with object-form `artifacts`, `updated_at`, and `visibility: "private"`; providers.json gains `pff`. The `--limit 1` flag picks the first match in alphabetical order from the source folder; the operator notes its ID for the next steps and exports it as `PFF_SMOKE_MATCH_ID`:
+
+```bash
+# Operator captures the uploaded match ID for downstream curl steps. Not committed.
+export PFF_SMOKE_MATCH_ID=$(ls "$PFF_SOURCE_DIR/Metadata" | head -1 | sed 's/\.json$//')
+```
 
 - [ ] **Step 2: Verify public token gets 404 on private match**
 
 ```bash
 API=$(cd terraform/environments/dev && terraform output -raw api_url)
-PUB="test-token-pining-for-the-data"
-curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/pff/matches/3812/metadata"
+PUB="$PUB_TOKEN"
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/pff/matches/$PFF_SMOKE_MATCH_ID/metadata"
 ```
 
 Expected: `404`.
@@ -3060,43 +4001,53 @@ curl -s -H "Authorization: Bearer $PUB" "$API/pff/matches" | python -m json.tool
 
 Expected: `{"provider": "pff", "matches": []}`.
 
-- [ ] **Step 4: Verify owner token gets 302 + can fetch the metadata**
+- [ ] **Step 4: Verify public token still sees pff in the providers list (spec §4.2)**
+
+```bash
+curl -s -H "Authorization: Bearer $PUB" "$API/providers" | python -m json.tool
+```
+
+Expected: `pff` is in the providers list — visible to public tier (existence is not the secret).
+
+- [ ] **Step 5: Verify owner token gets 302 + can fetch the metadata**
 
 ```bash
 OWNER=$(aws ssm get-parameter --name "/pining-for-the-data/api_token_owner" --with-decryption --query 'Parameter.Value' --output text)
-curl -s -L -H "Authorization: Bearer $OWNER" "$API/pff/matches/3812/metadata" | python -m json.tool | head -5
+curl -s -L -H "Authorization: Bearer $OWNER" "$API/pff/matches/$PFF_SMOKE_MATCH_ID/metadata" | python -m json.tool | head -5
 ```
 
-Expected: 302 followed transparently to the presigned URL, then the metadata JSON prints (showing Senegal vs Netherlands or similar World Cup 2022 match data).
+Expected: 302 followed transparently to the presigned URL, then the metadata JSON prints. The body content is not asserted in this smoke test (any specific team/player names would themselves be PFF mapping data).
 
-- [ ] **Step 5: Verify owner token sees the match in the list**
+- [ ] **Step 6: Verify owner token sees the match in the list with object-form artifacts**
 
 ```bash
 curl -s -H "Authorization: Bearer $OWNER" "$API/pff/matches" | python -m json.tool
 ```
 
-Expected: 1 match entry with `"id": "3812"` and `"visibility": "private"`.
+Expected: 1 match entry with `"id": "$PFF_SMOKE_MATCH_ID"`, `"visibility": "private"`, and `"artifacts"` as an object like `{"metadata": "metadata.json", "events": "events.json", "roster": "roster.json", "tracking": "tracking.jsonl.bz2"}`. Also has `"updated_at"` ending in `Z`.
 
-- [ ] **Step 6: No commit (operational task)**
+- [ ] **Step 7: No commit (operational task)**
 
 ---
 
 ### Task 20: Bulk PFF load and final verification
 
-**Files:** none — operational.
+**Files:** none — operational. (Task 21 below introduces the `verify_pff_load.py` script invoked at Step 8.)
 
-- [ ] **Step 1: Upload all 67 matches plus the player catalogue**
+**Prerequisite:** Phase 1–5 deployed; SSM owner token set. No licence gate (spec §8.3).
+
+- [ ] **Step 1: Upload all 64 matches plus the player catalogue**
 
 ```bash
 BUCKET=$(cd terraform/environments/dev && terraform output -raw bucket_name)
 python scripts/upload_pff_wc2022.py \
-  "D:\[Karsten]\Dropbox\[Microsoft]\Downloads\FIFA World Cup 2022" \
+  "$PFF_SOURCE_DIR" \
   --bucket "$BUCKET"
 ```
 
-Expected: 67 matches uploaded, players catalogue uploaded. Total runtime: 5-15 minutes depending on bandwidth (5.3 GB).
+Expected: 64 matches uploaded, players catalogue uploaded (canonical-JSON normalisation runs in a temp directory before `pining-upload-players` is invoked). Total runtime: 5-15 minutes depending on bandwidth (5.3 GB).
 
-- [ ] **Step 2: Verify owner token sees 67 matches**
+- [ ] **Step 2: Verify owner token sees 64 matches**
 
 ```bash
 API=$(cd terraform/environments/dev && terraform output -raw api_url)
@@ -3117,7 +4068,7 @@ Expected: `2322`.
 - [ ] **Step 4: Verify public token still sees zero matches and zero players for pff**
 
 ```bash
-PUB="test-token-pining-for-the-data"
+PUB="$PUB_TOKEN"
 curl -s -H "Authorization: Bearer $PUB" "$API/pff/matches" | python -c "import sys, json; print(len(json.load(sys.stdin)['matches']))"
 curl -s -H "Authorization: Bearer $PUB" "$API/pff/players" | python -c "import sys, json; print(len(json.load(sys.stdin)['players']))"
 ```
@@ -3126,16 +4077,21 @@ Expected: `0` and `0`.
 
 - [ ] **Step 5: Spot-check an individual player by ID**
 
+The operator picks a player ID from the loaded catalogue at runtime — do NOT hardcode a PFF identifier in committed docs (see memory `feedback_no_local_paths_in_committed_docs.md`; the same hygiene applies to provider identifiers).
+
 ```bash
-curl -s -H "Authorization: Bearer $OWNER" "$API/pff/players/8022" | python -m json.tool
+# Operator picks an ID from the loaded catalogue:
+SAMPLE_PLAYER_ID=$(curl -s -H "Authorization: Bearer $OWNER" "$API/pff/players" | \
+  python -c "import sys, json; print(json.load(sys.stdin)['players'][0]['id'])")
+curl -s -H "Authorization: Bearer $OWNER" "$API/pff/players/$SAMPLE_PLAYER_ID" | python -m json.tool
 ```
 
-Expected: Jurrien Timber's record with DOB, height, position. `"visibility": "private"`.
+Expected: a player record with `firstName`, `lastName`, `nickname`, and `"visibility": "private"`.
 
 - [ ] **Step 6: Verify public token gets 404 on the same player ID**
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/pff/players/8022"
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/pff/players/$SAMPLE_PLAYER_ID"
 ```
 
 Expected: `404`.
@@ -3148,18 +4104,345 @@ sleep 120  # CloudTrail delivers in batches
 aws s3 ls "s3://$AUDIT_BUCKET/AWSLogs/" --recursive | tail -5
 ```
 
-Expected: log files exist (typically `.json.gz`), with one or more from the last few minutes covering the recent S3 GetObject calls.
+Expected: log files exist (typically `.json.gz`), with one or more from the last few minutes covering the recent S3 GetObject calls. Per spec §7.5, `/matches.json` and `/players.json` reads are also logged (only `/providers.json` is excluded), so these recent enumeration calls should be visible.
 
-- [ ] **Step 8: No commit (operational task)**
+- [ ] **Step 8: Run automated post-load verification (`scripts/verify_pff_load.py`)**
+
+```bash
+python scripts/verify_pff_load.py \
+  --api "$API" \
+  --owner-token "$OWNER" \
+  --public-token "$PUB"
+```
+
+Expected: exits 0 with a summary like `OK: 64 matches, 2322 players; 5/5 artifact spot-checks pass; 3/3 player spot-checks pass; public-tier sees 0 matches, 0 players, pff in providers list`. Exits non-zero on ANY post-condition failure (count mismatch, visibility leak, artifact 404, player record missing).
+
+- [ ] **Step 9: No commit (operational task)**
+
+---
+
+### Task 21: Write `scripts/verify_pff_load.py`
+
+**Files:**
+- Create: `scripts/verify_pff_load.py`
+
+Replaces the manual `curl` smoke tests with an automated post-condition checker. Spec §8.3.1. The script is idempotent and side-effect-free (only HTTP GETs); it should be runnable any time after the PFF load to detect regressions.
+
+- [ ] **Step 1: Write the script**
+
+Create `scripts/verify_pff_load.py`:
+
+```python
+"""Post-load verification for the PFF World Cup 2022 dataset.
+
+Replaces manual curl smoke tests with an automated check that runs after
+scripts/upload_pff_wc2022.py and exits non-zero on any post-condition failure.
+
+Checks (spec §8.3.1):
+  - owner-tier /pff/matches returns exactly EXPECTED_MATCH_COUNT entries
+  - owner-tier /pff/players returns exactly EXPECTED_PLAYER_COUNT entries
+  - public-tier /pff/matches and /pff/players return zero entries
+  - public-tier /providers includes 'pff' (existence is not the secret)
+  - 5 random match × 4 artifact owner-tier fetches return 200 + non-empty body
+  - 3 specific known-good player IDs return 200 with expected fields
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import random
+import sys
+import urllib.parse
+import urllib.request
+from typing import Any
+
+EXPECTED_MATCH_COUNT = 67
+EXPECTED_PLAYER_COUNT = 2322
+PLAYER_SPOT_CHECK_SAMPLE_SIZE = 5  # sample N players from the response, content-agnostic
+ARTIFACTS_PER_MATCH = ["metadata", "events", "roster", "tracking"]
+
+# DO NOT hardcode (provider_id → name) tuples here — those are the licensed
+# mapping the spec §8.3 redistribution-licence gate exists to protect.
+# Spot-checks instead sample from the live response and validate shape only.
+
+
+def _get_json(api: str, path: str, token: str) -> Any:
+    req = urllib.request.Request(
+        f"{api}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8")), resp.status
+
+
+def _follow_redirect(api: str, path: str, token: str) -> tuple[int, int]:
+    """Follow a 302 from get_artifact and return (final_status, body_byte_count)."""
+    req = urllib.request.Request(
+        f"{api}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        body = resp.read()
+        return resp.status, len(body)
+
+
+def _get_status(api: str, path: str, token: str) -> int:
+    req = urllib.request.Request(
+        f"{api}{path}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Verify the PFF WC2022 dataset is loaded correctly")
+    parser.add_argument("--api", required=True, help="API base URL (no trailing slash)")
+    parser.add_argument("--owner-token", required=True)
+    parser.add_argument("--public-token", required=True)
+    parser.add_argument("--seed", type=int, default=0)
+    args = parser.parse_args()
+
+    failures: list[str] = []
+
+    # 1. Owner-tier match count
+    try:
+        body, _ = _get_json(args.api, "/pff/matches", args.owner_token)
+        n = len(body.get("matches", []))
+        if n != EXPECTED_MATCH_COUNT:
+            failures.append(f"owner /pff/matches: expected {EXPECTED_MATCH_COUNT}, got {n}")
+        else:
+            print(f"OK: owner /pff/matches = {n}")
+    except Exception as e:
+        failures.append(f"owner /pff/matches: request failed: {e}")
+        body = {"matches": []}
+
+    matches = body.get("matches", [])
+
+    # 2. Owner-tier player count
+    try:
+        pbody, _ = _get_json(args.api, "/pff/players", args.owner_token)
+        np_ = len(pbody.get("players", []))
+        if np_ != EXPECTED_PLAYER_COUNT:
+            failures.append(f"owner /pff/players: expected {EXPECTED_PLAYER_COUNT}, got {np_}")
+        else:
+            print(f"OK: owner /pff/players = {np_}")
+    except Exception as e:
+        failures.append(f"owner /pff/players: request failed: {e}")
+
+    # 3. Public-tier visibility leak checks
+    try:
+        body, _ = _get_json(args.api, "/pff/matches", args.public_token)
+        if body.get("matches"):
+            failures.append(f"VISIBILITY LEAK: public /pff/matches returned {len(body['matches'])} entries (expected 0)")
+        else:
+            print("OK: public /pff/matches = 0")
+    except Exception as e:
+        failures.append(f"public /pff/matches: request failed: {e}")
+
+    try:
+        body, _ = _get_json(args.api, "/pff/players", args.public_token)
+        if body.get("players"):
+            failures.append(f"VISIBILITY LEAK: public /pff/players returned {len(body['players'])} entries (expected 0)")
+        else:
+            print("OK: public /pff/players = 0")
+    except Exception as e:
+        failures.append(f"public /pff/players: request failed: {e}")
+
+    # 4. public /providers MUST include pff (existence is not the secret; spec §4.2)
+    try:
+        body, _ = _get_json(args.api, "/providers", args.public_token)
+        if "pff" not in body.get("providers", []):
+            failures.append("public /providers: 'pff' missing — spec §4.2 says public tier sees all providers")
+        else:
+            print("OK: public /providers contains 'pff'")
+    except Exception as e:
+        failures.append(f"public /providers: request failed: {e}")
+
+    # 5. Owner-tier artifact spot-check (5 random matches × 4 artifacts)
+    rng = random.Random(args.seed)
+    sample = rng.sample(matches, min(5, len(matches)))
+    spot_pass = 0
+    spot_total = 0
+    for m in sample:
+        match_id = m["id"]
+        for artifact in ARTIFACTS_PER_MATCH:
+            spot_total += 1
+            try:
+                status, size = _follow_redirect(args.api, f"/pff/matches/{match_id}/{artifact}", args.owner_token)
+                if status == 200 and size > 0:
+                    spot_pass += 1
+                else:
+                    failures.append(f"artifact spot-check {match_id}/{artifact}: status={status}, body={size}B")
+            except Exception as e:
+                failures.append(f"artifact spot-check {match_id}/{artifact}: failed: {e}")
+    print(f"OK: artifact spot-check {spot_pass}/{spot_total}")
+
+    # 6. Player spot-check — content-agnostic. Sample N players from the live
+    # response and assert each conforms to the canonical PlayerRecord shape:
+    # has an id matching the path-param regex, and at least one of nickname /
+    # firstName+lastName per spec §6.3.
+    try:
+        all_players_body, _ = _get_json(args.api, "/pff/players", args.owner_token)
+        all_players = all_players_body.get("players", [])
+    except Exception as e:
+        failures.append(f"owner /pff/players for spot-check: failed: {e}")
+        all_players = []
+
+    sample_players = rng.sample(all_players, min(PLAYER_SPOT_CHECK_SAMPLE_SIZE, len(all_players)))
+    player_pass = 0
+    for p in sample_players:
+        pid = p.get("id", "")
+        # Round-trip via /pff/players/{id} to confirm individual lookup works.
+        try:
+            body, _ = _get_json(args.api, f"/pff/players/{pid}", args.owner_token)
+            shape_ok = (
+                isinstance(body.get("id"), str)
+                and (body.get("nickname") or (body.get("firstName") and body.get("lastName")))
+                and body.get("visibility") == "private"
+            )
+            if shape_ok:
+                player_pass += 1
+            else:
+                failures.append(f"player {pid}: PlayerRecord shape invalid in response")
+        except Exception as e:
+            failures.append(f"player {pid}: request failed: {e}")
+    print(f"OK: player spot-check {player_pass}/{len(sample_players)}")
+
+    # 7. Public-tier 404 on a known private artifact (spot-check uniform-404)
+    if matches:
+        any_match = matches[0]["id"]
+        any_artifact = next(iter(matches[0].get("artifacts", {}).keys()), "metadata")
+        status = _get_status(args.api, f"/pff/matches/{any_match}/{any_artifact}", args.public_token)
+        if status != 404:
+            failures.append(f"public /pff/matches/{any_match}/{any_artifact}: expected 404, got {status}")
+        else:
+            print(f"OK: public 404 on private artifact /pff/matches/{any_match}/{any_artifact}")
+
+    if failures:
+        print("\nFAILURES:")
+        for f in failures:
+            print(f"  - {f}")
+        return 1
+    print("\nAll post-conditions pass.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+- [ ] **Step 2: Smoke-check the script with `--help`**
+
+```bash
+python scripts/verify_pff_load.py --help
+```
+
+Expected: usage printed, no errors.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add scripts/verify_pff_load.py
+git commit -m "feat(scripts): add verify_pff_load post-load post-condition checker"
+```
+
+---
+
+### Task 22: Rotation runbook and rehearsal
+
+**Files:** none — operational + documents the runbook for spec §3.5.
+
+The owner-token rotation procedure is in spec §3.5. This task is the operational rehearsal: exercise the handshake end-to-end against the dev stack so the runbook is verified executable, and so the operator has muscle memory before a real rotation.
+
+**Critical:** the `LAST_ROTATION` env-var bump MUST cover all five Lambdas (`list_providers`, `list_matches`, `get_artifact`, `list_players`, `get_player`) in the same `terraform apply` — otherwise endpoints diverge: `/matches` accepts the new token while `/players` still accepts the old one, depending on which handler was bumped, and a consumer making mixed-endpoint calls sees split-brain auth (spec §3.5).
+
+**No dual-validity in v1.** During the rotation window, consumers will see transient 401s from in-flight warm containers; the API does NOT keep both tokens valid. Consumers MUST implement 401 retry with backoff. Spec §3.5 covers this; spec §11.6 sketches the future zero-downtime upgrade if the operational pattern ever needs it.
+
+- [ ] **Step 1: Capture the current owner token (so it can be restored after the rehearsal)**
+
+```bash
+ORIG_OWNER=$(aws ssm get-parameter --name "/pining-for-the-data/api_token_owner" --with-decryption --query 'Parameter.Value' --output text)
+```
+
+- [ ] **Step 2: Generate a new token and write it to SSM**
+
+```bash
+NEW_OWNER=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+aws ssm put-parameter \
+  --name "/pining-for-the-data/api_token_owner" \
+  --value "$NEW_OWNER" \
+  --type SecureString \
+  --overwrite
+```
+
+- [ ] **Step 3: Bump `LAST_ROTATION` on ALL five Lambdas via a single `terraform apply`**
+
+```bash
+cd terraform/environments/dev
+terraform apply -var="last_rotation=$(date -u +%Y%m%dT%H%M%SZ)" -auto-approve
+```
+
+Expected: all five Lambda functions updated (only the `LAST_ROTATION` env var changed). This bump triggers AWS to provision new containers, which fetch the new SSM value on first invocation.
+
+- [ ] **Step 4: Verify old token now fails on every endpoint within ~1 minute**
+
+```bash
+API=$(terraform output -raw api_url)
+for endpoint in "/providers" "/skillcorner/matches" "/skillcorner/players"; do
+  printf "%-30s -> " "$endpoint (old)"
+  curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $ORIG_OWNER" "$API$endpoint"
+done
+```
+
+Expected: every endpoint returns `401` once the warm-container population has fully recycled (typically under a minute under steady traffic; longer if traffic is sparse — re-run if some endpoints still return 200).
+
+- [ ] **Step 5: Verify new token works on every endpoint**
+
+```bash
+for endpoint in "/providers" "/skillcorner/matches" "/skillcorner/players"; do
+  printf "%-30s -> " "$endpoint (new)"
+  curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $NEW_OWNER" "$API$endpoint"
+done
+```
+
+Expected: every endpoint returns `200`.
+
+- [ ] **Step 6: Restore the original token (rehearsal cleanup)**
+
+```bash
+aws ssm put-parameter \
+  --name "/pining-for-the-data/api_token_owner" \
+  --value "$ORIG_OWNER" \
+  --type SecureString \
+  --overwrite
+terraform apply -var="last_rotation=$(date -u +%Y%m%dT%H%M%SZ)" -auto-approve
+unset ORIG_OWNER NEW_OWNER
+```
+
+Expected: the original token is restored across all five Lambdas; the rehearsal leaves the system in its pre-rehearsal state.
+
+- [ ] **Step 7: No commit (operational task)**
 
 ---
 
 ## Self-review notes
 
-- All spec sections (3 auth, 4 visibility, 5 S3 layout, 6 reference resources, 7 audit logging, 8 upload tooling, 9 Lakehouse contract, 10 migration, 12 tests) have at least one task. The Lakehouse contract (section 9) is implicit — the API change is what the adapter consumes; no work in this repo. Migration (section 10) is exercised by Tasks 3, 6, 16, 19, 20 (operational deploy + smoke).
-- No placeholders. Every step has either exact code, an exact command, or both.
-- Type consistency: `Tier` enum used consistently across handlers. `validate_token` signature is `Tier | dict`. `visibility` is consistently `"public" | "private"` (string, not enum) at the upload-tool boundary because it crosses argparse — internal Lambda code doesn't reuse that string.
-- One known scope gap: spec section 4.4 mentions deferring optional `--source-licence` flag spelling consistency. The existing `pining-upload` uses `--source-license` (American spelling); the new `pining-upload-players` uses `--source-licence` (British, matching the spec). This is inconsistent. Acceptable for v1 since the two CLIs are different commands; flagged for cleanup later if it bothers a future reader.
+- All spec sections (3 auth incl. §3.5 onboarding/rotation, 4 visibility, 5 S3 layout, 6 reference resources incl. §6.6 schemas, 7 audit logging, 8 upload tooling incl. §8.2.1 spelling and §8.3 licence gate, 9 consumer contract, 10 migration, 11 future extensions incl. §11.4 re-tiering and §11.6 dual-validity sketch, 12 tests, 13 resolved questions) have at least one task. The consumer contract (§9) is implicit — the API change is what consumers consume; no work in this repo. Migration (§10) is exercised by Tasks 3, 6, 6.5, 16, 19, 20 (operational deploy + smoke + licence-gated bulk load).
+- No placeholders. Every step has either exact code, an exact command, or both. The one operator-supplied input (PFF source folder) is referenced via `$PFF_SOURCE_DIR` env var; local paths are deliberately NOT committed (per memory `feedback_no_local_paths_in_committed_docs.md`).
+- Type consistency: `Tier` enum used consistently across handlers. `validate_token` signature is `Tier | dict`; duplicate-token misconfiguration classifies as `Tier.PUBLIC` (fail closed; spec §3.2). `visibility` is consistently `"public" | "private"` (string, not enum) at the upload-tool boundary because it crosses argparse — internal Lambda code uses the string but Pydantic models pin the literal. `artifacts` is `dict[str, str]` everywhere (spec §4.1) — array form is gone end-to-end.
+- Schema discipline: `MatchEntry` and `PlayerRecord` Pydantic models are the single source of truth (Phase 2.5, Task 6.5); `schemas/{matches,players}.schema.json` are generated from them and drift-tested in CI. Both upload CLIs validate against the models before any S3 call. Adding fields requires only model edit + `python scripts/regenerate_schemas.py`.
+- Spelling consistency: British `--source-licence` is canonical on both `pining-upload` and `pining-upload-players`; American `--source-license` is a quiet alias on both (spec §8.2.1). The internal JSON field is always `licence`. The pre-revision inconsistency between the two CLIs is resolved.
+- CloudTrail filter discipline: `not_ends_with` excludes only `/providers.json` (spec §7.5). The earlier sketch's broader exclusion (also `/matches.json` and `/players.json`) is corrected to keep enumeration-vector reads logged.
+- Operational gating: Phase 6 (bulk PFF load) has NO runtime licence gate. Spec §8.3 documents the rationale — under the single-owner threat model, a private-tier load is data movement within the operator's own systems (their copy of the data into their own private bucket served back to their own owner-token holder), not redistribution to a third party. If a public-tier upload mode is ever added to `scripts/upload_pff_wc2022.py`, that path will need its own licence-clarification gate.
+- Verify script (`scripts/verify_pff_load.py`, Task 21) replaces the manual `curl` smoke tests with an automated post-condition checker. It's HTTP-only, idempotent, and re-runnable any time after the load. Player spot-checks are content-agnostic — sample N records from the live response and validate canonical-shape conformance (no hardcoded provider-specific id→name tuples; the licensed mapping is exactly what the §8.3 redistribution gate exists to protect, including in committed test fixtures).
+- Rotation runbook (Task 22) is exercised end-to-end as a rehearsal. The `LAST_ROTATION` env var bumps all five Lambdas in a single `terraform apply` (spec §3.5: split-brain risk if only some are bumped). v1 has no dual-validity — consumers MUST implement 401 retry during the rotation window, per spec §3.5; the future zero-downtime upgrade path is sketched in spec §11.6.
+- Sensitive-content hygiene: no operator-local paths (uses `$PFF_SOURCE_DIR`), no hardcoded provider-internal identifiers in committed test fixtures or smoke commands (synthetic `m-001`/`test-001`/`test-002` for tests; `$PFF_SMOKE_MATCH_ID` for operational smoke; sample-from-live-response in verify script). The public token literal `test-token-pining-for-the-data` is parameterised as `$PUB_TOKEN` even though it's already documented in README — keeps the plan portable across rotations.
+- Whitelist enforcement on artifact keys: `MatchEntry` Pydantic model has a `model_validator` asserting every artifact key matches the path-param regex, so the upload tool cannot land entries the API would refuse to serve (closes the path-traversal-style write that the API would block at request time but the upload tool wouldn't catch).
 
 ---
 

@@ -8,6 +8,8 @@ license = { text = "MIT" }
 dependencies = [
     "pandas>=2.2.0",
     "pyarrow>=15.0.0",
+    "pydantic>=2.0",
+    "jsonschema>=4.0",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +33,7 @@ pining-generate-roster = "deidentify.roster_generator:main"
 pining-ingest = "formats.skillcorner:main"
 pining-publish = "publish.hf_push:main"
 pining-upload = "mock_api.upload:main"
+pining-upload-players = "mock_api.upload_players:main"
 
 [tool.ruff]
 target-version = "py312"
@@ -50,11 +53,18 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"src/tests/**" = ["S101", "S311"]  # assert + pseudo-random OK in tests
+"src/tests/**" = ["S101", "S311", "N803"]  # assert + pseudo-random OK in tests; boto3 mock kwargs use CamelCase
 "src/deidentify/**" = ["S311"]  # pseudo-random is fine for fake name generation
+# Pydantic models mirror provider field names (PFF: firstName, lastName, positionGroupType)
+# and pass them through verbatim — keeping camelCase is intentional for fidelity. Spec §6.3.
+"src/canonical/models.py" = ["N815"]
+# verify script uses random.Random(seed) for deterministic, non-crypto spot-check sampling;
+# urllib.request to a configurable HTTPS API endpoint is the entire point (S310 false-positive);
+# Unicode × in docstring is intentional ("5 × 4 = 20 fetches")
+"scripts/verify_pff_load.py" = ["S311", "S310", "RUF002", "RUF003"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["deidentify", "formats", "publish", "mock_api"]
+known-first-party = ["deidentify", "formats", "publish", "mock_api", "canonical"]
 
 [tool.pyright]
 pythonVersion = "3.12"
@@ -68,7 +78,7 @@ testpaths = ["src/tests"]
 addopts = "--tb=short -q"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/deidentify", "src/formats", "src/publish", "src/mock_api"]
+packages = ["src/deidentify", "src/formats", "src/publish", "src/mock_api", "src/canonical"]
 
 [build-system]
 requires = ["hatchling"]

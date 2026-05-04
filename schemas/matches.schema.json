@@ -1,0 +1,125 @@
+{
+  "$defs": {
+    "_SourceMeta": {
+      "description": "Provenance metadata for an upstream data source.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "title": "Url",
+          "type": "string"
+        },
+        "licence": {
+          "default": "",
+          "title": "Licence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "_SourceMeta",
+      "type": "object"
+    }
+  },
+  "$id": "urn:pining-for-the-data:schema:matches:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "Canonical shape of a single entry in `{provider}/matches.json`. Spec \u00a74.1.",
+  "properties": {
+    "id": {
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "artifacts": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Map of artifact-name to exact filename. Keys form the API whitelist; each key MUST match the path-param regex.",
+      "title": "Artifacts",
+      "type": "object"
+    },
+    "visibility": {
+      "pattern": "^(public|private)$",
+      "title": "Visibility",
+      "type": "string"
+    },
+    "updated_at": {
+      "description": "ISO 8601 UTC timestamp",
+      "title": "Updated At",
+      "type": "string"
+    },
+    "date": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Date"
+    },
+    "home": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Home"
+    },
+    "away": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Away"
+    },
+    "provenance": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provenance"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/_SourceMeta"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "id",
+    "artifacts",
+    "visibility",
+    "updated_at"
+  ],
+  "title": "MatchEntry",
+  "type": "object"
+}

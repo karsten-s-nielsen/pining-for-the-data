@@ -10,7 +10,7 @@
 
 The mock provider API currently serves redistributed open data (SkillCorner V3 A-League) under a single shared bearer token, intentionally documented as public. Two upcoming use cases require the same API surface to also gate restricted content:
 
-1. **PFF FIFA World Cup 2022** — access granted to the repo owner; licence terms being clarified with the source. Treated as restricted until clarification arrives in writing. Roughly 67 matches plus tournament-level reference files.
+1. **PFF FIFA World Cup 2022** — access granted to the repo owner; licence terms being clarified with the source. Treated as restricted until clarification arrives in writing. Roughly 64 matches plus tournament-level reference files.
 2. **Soccermatics Pro cohort data** — restricted by course enrolment terms. Provider identity not yet known; may overlap with a provider already in the public tier.
 
 The goal is a single, formal API the Lakehouse adapter can call regardless of whether content is open or restricted. Mixing tiers cleanly — including within a single real-world provider — is a hard requirement.
@@ -160,7 +160,7 @@ Identifiers and team names in the example above are illustrative — the spec de
 
 `artifacts` is an object mapping artifact name → exact filename (relative to the match's S3 prefix). The keys form the artifact whitelist (consumed by `get_artifact`, see §4.3); the values let the API return a presigned URL without per-request S3 listing. This is a deliberate change from the original sketch, which used an array of names and forced `get_artifact` to list S3 by prefix on every request to discover the file extension. The object form costs one extra string per artifact in the index and removes one S3 call per artifact request — the trade is overwhelmingly in favour of the object form even at our scale, and necessary if the Lakehouse ever does parallel ingest of all matches.
 
-The full canonical shape of a match entry is defined by a Pydantic model `MatchEntry` in `terraform/modules/functions/src/shared.py` and published as JSON Schema at `schemas/matches.schema.json` (see section 6.6 for the schema lifecycle). The example above is illustrative; the schema is authoritative.
+The full canonical shape of a match entry is defined by a Pydantic model `MatchEntry` in `src/canonical/models.py` and published as JSON Schema at `schemas/matches.schema.json` (see section 6.6 for the schema lifecycle and the rationale for keeping the models outside the Lambda source dir). The example above is illustrative; the schema is authoritative.
 
 ### 4.2 Listing semantics
 
@@ -267,7 +267,7 @@ For PFF World Cup 2022 (~2,322 records, ~350 KB JSON), the full list comfortably
 
 `{provider}/players.json` (public) and `{provider}/_private/players.json` (private) — two physically-separate files, one per tier. The owner-tier handler reads both and merges; the public-tier handler reads only the public file. This mirrors the `_private/` pattern used for matches and keeps the defense-in-depth posture: a private record never sits in a file the public-tier handler is allowed to open.
 
-A canonical player record is defined here so a future provider's data shape doesn't quietly become whatever the second uploader needs. The shape is enforced by a Pydantic model `PlayerRecord` in `terraform/modules/functions/src/shared.py`, published as JSON Schema at `schemas/players.schema.json`, and validated at write time by `pining-upload-players`.
+A canonical player record is defined here so a future provider's data shape doesn't quietly become whatever the second uploader needs. The shape is enforced by a Pydantic model `PlayerRecord` in `src/canonical/models.py`, published as JSON Schema at `schemas/players.schema.json`, and validated at write time by `pining-upload-players`.
 
 **Required fields:**
 - `id` (string): provider-stable player identifier; matches `^[a-zA-Z0-9][a-zA-Z0-9_-]*$`. Provider IDs need not be globally unique across providers (different providers may both use a numeric id `1234` for unrelated players); the `(provider, id)` pair is the global key.
@@ -370,7 +370,7 @@ For PFF specifically, the CSV→canonical adapter lives in `scripts/upload_pff_w
 
 ### 6.6 JSON Schemas and Pydantic models
 
-The canonical shapes for `matches.json` entries and `players.json` entries are defined as Pydantic models (`MatchEntry`, `PlayerRecord`) in `terraform/modules/functions/src/shared.py`. The same models are imported by the upload CLIs and the Lambda handlers, so writes and reads cannot drift.
+The canonical shapes for `matches.json` entries and `players.json` entries are defined as Pydantic models (`MatchEntry`, `PlayerRecord`) in `src/canonical/models.py`. The upload CLIs validate against these models before any S3 write. Lambda handlers do NOT import the models — they consume already-validated dict payloads from S3 and only need the runtime utilities in `terraform/modules/functions/src/shared.py`. This keeps the Lambda zip dependency-free (no pydantic at runtime) while preserving a single schema source of truth on the write path.
 
 The models are also published as JSON Schema files at:
 
@@ -480,7 +480,7 @@ A small adapter script (`scripts/upload_pff_wc2022.py`) is the right shape for t
 The script:
 
 1. **Loads private-tier only — no licence gate.** Visibility is hardcoded to `"private"` for both matches and players. A single-owner private-tier load (data goes only into the operator's own private S3 bucket, served back only to the operator's own owner-token holder) does not engage redistribution licence concerns: it's the operator moving their own data between their own systems, not redistribution to a third party. The recorded `SOURCE_LICENCE` constant still reads `"Restricted; redistribution not permitted pending licence clarification"` — that's accurate metadata for the entries, but it's a record of provenance, not a runtime gate. If a public-tier upload mode is ever added to this script (e.g., after a permissive licence clarifies), THAT path will need its own licence-clarification gate before serving — but the private-tier path stays gate-free.
-2. Iterates the 67 matches. For each, reshapes the source layout into a per-match staging directory:
+2. Iterates the 64 matches. For each, reshapes the source layout into a per-match staging directory:
    ```
    staging/{id}/
    ├── metadata.json
@@ -492,7 +492,7 @@ The script:
 4. Invokes `pining-upload --provider pff --game-id {id} --visibility private --provenance original --source-name "PFF FC" --source-url "https://www.pff.com/" --source-licence "Restricted; redistribution not permitted pending licence clarification"` with those values.
 5. After all matches: reads `players.csv`, normalises each row into a canonical `PlayerRecord` JSON dict (renaming/coercing fields to match the schema in section 6.3), writes the normalised list to a temp `players.json`, then invokes `pining-upload-players players.json --provider pff --visibility private --source-licence "..."` with the same source metadata. The CSV→canonical normaliser lives in this script; `pining-upload-players` only consumes canonical JSON (per section 6.5).
 
-`competitions.csv` is intentionally not uploaded. It is a tournament-level directory of match IDs, which is fully reachable via `GET /v1/pff/matches` once all 67 matches are loaded. Republishing it as a separate resource would duplicate navigation that the matches endpoint already provides.
+`competitions.csv` is intentionally not uploaded. It is a tournament-level directory of match IDs, which is fully reachable via `GET /v1/pff/matches` once all 64 matches are loaded. Republishing it as a separate resource would duplicate navigation that the matches endpoint already provides.
 
 The script is idempotent: re-running re-uploads everything but produces no duplicate index entries. Useful both for the initial load and for re-runs after correcting any per-match metadata.
 
@@ -543,7 +543,7 @@ Existing data is unaffected. Concretely:
 3. `pining-upload` existing entries continue to work — they have no `visibility` field, are treated as public, served to both tiers.
 4. Backfill `visibility: "public"` into existing `matches.json` entries opportunistically (next time each is re-uploaded for any reason). No urgency — the missing-means-public default is forward-compatible.
 5. Verify the deployed stack with one PFF match before bulk-loading the rest.
-6. Run `scripts/upload_pff_wc2022.py` to load the 67 matches plus the player catalogue.
+6. Run `scripts/upload_pff_wc2022.py` to load the 64 matches plus the player catalogue.
 
 No data movement of existing public matches. No breaking change to any existing API response (every new field is additive, every new endpoint is on a new path).
 
@@ -564,7 +564,7 @@ Licence clarification has been requested from the source; awaiting response. Thr
 
 ### 11.4 Re-tiering procedure (manual)
 
-v1 doesn't ship a `pining-retier` CLI; the upload tooling rejects any re-upload that flips a match's or player's visibility (section 8.2). Re-tiering is a deliberately rare operation (typically: PFF licence clarifies as permissive, and 67 matches need to flip from private to public). The manual procedure:
+v1 doesn't ship a `pining-retier` CLI; the upload tooling rejects any re-upload that flips a match's or player's visibility (section 8.2). Re-tiering is a deliberately rare operation (typically: PFF licence clarifies as permissive, and 64 matches need to flip from private to public). The manual procedure:
 
 1. **Plan the move.** List affected match IDs (or player IDs) up front. For PFF: every match in `matches.json`. For a partial re-tier: the explicit subset.
 2. **Copy the S3 objects to the new prefix.** For each match: `aws s3 cp --recursive s3://$BUCKET/pff/_private/$MATCH_ID/ s3://$BUCKET/pff/$MATCH_ID/`. For the players index: copy the file to its new tier path.

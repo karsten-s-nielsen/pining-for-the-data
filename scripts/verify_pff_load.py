@@ -23,8 +23,10 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-EXPECTED_MATCH_COUNT = 67
-EXPECTED_PLAYER_COUNT = 2322
+EXPECTED_MATCH_COUNT = 64  # FIFA WC 2022: 48 group-stage + 16 knockout matches
+# Unique player IDs after dedup. PFF CSV has ~2321 (player, team) rows;
+# many players belong to multiple rows (different roster slots).
+EXPECTED_PLAYER_COUNT = 829
 PLAYER_SPOT_CHECK_SAMPLE_SIZE = 5  # sample N players from the response, content-agnostic
 ARTIFACTS_PER_MATCH = ["metadata", "events", "roster", "tracking"]
 
@@ -43,12 +45,39 @@ def _get_json(api: str, path: str, token: str) -> tuple[Any, int]:
 
 
 def _follow_redirect(api: str, path: str, token: str) -> tuple[int, int]:
-    """Follow a 302 from get_artifact and return (final_status, body_byte_count)."""
-    req = urllib.request.Request(
+    """Two-step download: GET the API (302 with presigned URL), then GET the URL
+    WITHOUT the bearer header. S3 rejects requests carrying both `Authorization:
+    Bearer` and a presigned `X-Amz-Signature` (treats it as conflicting auth);
+    the bearer is only for the API, the presigned URL self-authenticates.
+
+    Returns (final_status, body_byte_count) of the actual S3 download.
+    """
+    # Step 1: Get the 302 from the API (don't follow automatically — urllib
+    # would forward the Authorization header to S3, which causes the conflict).
+    api_req = urllib.request.Request(
         f"{api}{path}",
         headers={"Authorization": f"Bearer {token}"},
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
+
+    class _NoFollow(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None  # disable auto-follow
+
+    opener = urllib.request.build_opener(_NoFollow)
+    try:
+        with opener.open(api_req, timeout=30) as resp:
+            # Shouldn't get here for a 302 path, but handle direct 200 just in case.
+            return resp.status, len(resp.read())
+    except urllib.error.HTTPError as e:
+        if e.code != 302:
+            raise
+        location = e.headers.get("Location")
+        if not location:
+            raise RuntimeError(f"302 from API but no Location header for {path}") from e
+
+    # Step 2: GET the presigned URL with NO Authorization header.
+    s3_req = urllib.request.Request(location)
+    with urllib.request.urlopen(s3_req, timeout=60) as resp:
         body = resp.read()
         return resp.status, len(body)
 

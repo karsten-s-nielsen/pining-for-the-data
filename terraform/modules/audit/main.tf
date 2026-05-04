@@ -89,16 +89,14 @@ resource "aws_cloudtrail" "data_bucket" {
       field  = "resources.type"
       equals = ["AWS::S3::Object"]
     }
-    field_selector {
-      field       = "resources.ARN"
-      starts_with = ["${var.data_bucket_arn}/"]
-    }
     # Spec §7.5: exclude ONLY providers.json (true bookkeeping; never reveals
     # private content). matches.json and players.json reads stay logged because
     # enumeration via /matches and /players is the most likely abuse vector and
-    # the trail is its forensic record.
+    # the trail is its forensic record. Combined into a single selector because
+    # CloudTrail rejects multiple selectors for the same field.
     field_selector {
       field         = "resources.ARN"
+      starts_with   = ["${var.data_bucket_arn}/"]
       not_ends_with = ["/providers.json"]
     }
   }

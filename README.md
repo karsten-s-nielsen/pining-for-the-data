@@ -89,7 +89,7 @@ git clone https://github.com/karsten-s-nielsen/pining-for-the-data.git
 cd pining-for-the-data
 uv sync --extra dev
 
-# Run tests — all 125 should pass
+# Run tests — all 127 should pass
 uv run pytest
 ```
 
@@ -172,7 +172,8 @@ pining-for-the-data/
 │   ├── formats/             # Provider format readers/writers (SkillCorner, Respo.Vision)
 │   ├── publish/             # HuggingFace Hub dataset publishing
 │   ├── mock_api/            # Upload CLIs (pining-upload, pining-upload-players)
-│   └── tests/               # pytest test suite (125 tests)
+│   ├── canonical/           # Canonical Pydantic models (MatchEntry, PlayerRecord); kept out of Lambda src so the runtime stays pydantic-free (ADR 0006)
+│   └── tests/               # pytest test suite (127 tests)
 ├── name_pools/              # JSON name lists (fictional first/last names, cities)
 ├── rosters/                 # Generated de-identified rosters per game
 ├── schemas/                 # Published JSON Schemas for matches.json + players.json

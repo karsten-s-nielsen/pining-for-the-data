@@ -11,6 +11,7 @@ This directory contains [Architecture Decision Records](https://adr.github.io/) 
 | [0003](0003-resource-noun-endpoints-no-files-escape-hatch.md) | Resource-Noun Endpoints (`/players`), Not a Generic `/files` Escape Hatch | Accepted | Reference data API design (spec §6) |
 | [0004](0004-cloudtrail-data-events-on-data-bucket.md) | CloudTrail Data Events on the Data Bucket | Accepted | Audit trail for restricted content (spec §7) |
 | [0005](0005-single-bucket-multi-tier-prefix-isolation.md) | Single Bucket + Single KMS Key, Multi-Tier via Prefix Isolation | Accepted | S3 layout for tier-aware serving (spec §5.3) |
+| [0006](0006-canonical-models-outside-lambda-source.md) | Canonical Pydantic Models Live Outside the Lambda Source Directory | Accepted | Lambda runtime hardening; emerged at deploy (no spec section) |
 
 ## Format
 

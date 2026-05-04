@@ -10,7 +10,8 @@ Companion repo to luxury-lakehouse.
 - `src/publish/` — HuggingFace Hub dataset publishing
 - `src/mock_api/` — Upload CLIs (pining-upload, pining-upload-players)
 - `src/tests/` — pytest test suite
-- `schemas/` — Published JSON Schemas for `matches.json` and `players.json` (generated from Pydantic models in `terraform/modules/functions/src/shared.py`; drift-tested in CI)
+- `schemas/` — Published JSON Schemas for `matches.json` and `players.json` (generated from Pydantic models in `src/canonical/models.py`; drift-tested in CI; models kept out of the Lambda zip so the runtime stays pydantic-free)
+- `src/canonical/` — Canonical Pydantic models (`MatchEntry`, `PlayerRecord`); imported by upload CLIs + schema regenerator + tests
 - `scripts/` — One-shot ops scripts (regenerate_schemas.py, upload_pff_wc2022.py, verify_pff_load.py)
 - `name_pools/` — JSON name lists (fictional first/last names, cities)
 - `rosters/` — generated de-identified roster JSONs per game

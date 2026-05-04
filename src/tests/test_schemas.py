@@ -14,8 +14,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS_DIR = REPO_ROOT / "schemas"
-LAMBDA_SRC = REPO_ROOT / "terraform" / "modules" / "functions" / "src"
-sys.path.insert(0, str(LAMBDA_SRC))
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 
 def _load_schema(name: str) -> dict:
@@ -24,7 +23,7 @@ def _load_schema(name: str) -> dict:
 
 class TestMatchEntrySchema:
     def test_committed_schema_matches_model(self):
-        from shared import MatchEntry
+        from canonical.models import MatchEntry
 
         committed = _load_schema("matches.schema.json")
         generated = MatchEntry.model_json_schema()
@@ -41,7 +40,7 @@ class TestMatchEntrySchema:
 
 class TestPlayerRecordSchema:
     def test_committed_schema_matches_model(self):
-        from shared import PlayerRecord
+        from canonical.models import PlayerRecord
 
         committed = _load_schema("players.schema.json")
         generated = PlayerRecord.model_json_schema()

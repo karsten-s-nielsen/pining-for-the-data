@@ -457,6 +457,45 @@ class TestGetArtifact:
         result = handler(event, None)
         assert result["statusCode"] == 302
 
+    def test_legacy_array_form_artifacts_falls_back_to_s3_list(self) -> None:
+        """Legacy entries with `artifacts: ["name1", "name2"]` (pre-Task-8 array form)
+        must still resolve via S3 listing — backwards-compat with already-deployed data."""
+        from get_artifact import handler
+
+        mock_s3 = _mock_s3()
+        self._wire_matches(
+            mock_s3,
+            {"provider": "sc", "matches": [{"id": "g1", "artifacts": ["match", "tracking"]}]},
+        )
+        mock_s3.list_objects_v2.return_value = {"Contents": [{"Key": "sc/g1/match.json"}]}
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc", "id": "g1", "artifact": "match"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 302
+        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "sc/g1/match.json"
+        mock_s3.list_objects_v2.assert_called_once()
+
+    def test_legacy_array_form_artifact_not_in_whitelist_returns_404(self) -> None:
+        from get_artifact import handler
+
+        mock_s3 = _mock_s3()
+        self._wire_matches(
+            mock_s3,
+            {"provider": "sc", "matches": [{"id": "g1", "artifacts": ["match"]}]},
+        )
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc", "id": "g1", "artifact": "tracking"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 404
+        mock_s3.generate_presigned_url.assert_not_called()
+        mock_s3.list_objects_v2.assert_not_called()
+
     def test_missing_path_parameters(self) -> None:
         from get_artifact import handler
 
@@ -645,7 +684,7 @@ class TestGetPlayer(_PlayersWiring):
 
 class TestPydanticModels:
     def test_match_entry_minimal_valid(self):
-        from shared import MatchEntry
+        from canonical.models import MatchEntry
 
         m = MatchEntry(
             id="m-001",
@@ -658,14 +697,16 @@ class TestPydanticModels:
 
     def test_match_entry_rejects_missing_required(self):
         from pydantic import ValidationError
-        from shared import MatchEntry
+
+        from canonical.models import MatchEntry
 
         with pytest.raises(ValidationError):
             MatchEntry(id="m-001")  # missing artifacts, visibility, updated_at
 
     def test_match_entry_rejects_artifact_key_with_path_traversal(self):
         from pydantic import ValidationError
-        from shared import MatchEntry
+
+        from canonical.models import MatchEntry
 
         with pytest.raises(ValidationError, match="artifact name"):
             MatchEntry(
@@ -677,7 +718,8 @@ class TestPydanticModels:
 
     def test_match_entry_rejects_artifact_key_with_leading_underscore(self):
         from pydantic import ValidationError
-        from shared import MatchEntry
+
+        from canonical.models import MatchEntry
 
         with pytest.raises(ValidationError, match="artifact name"):
             MatchEntry(
@@ -689,26 +731,28 @@ class TestPydanticModels:
 
     def test_player_record_requires_id(self):
         from pydantic import ValidationError
-        from shared import PlayerRecord
+
+        from canonical.models import PlayerRecord
 
         with pytest.raises(ValidationError):
             PlayerRecord(nickname="No ID", visibility="public", updated_at="2026-05-02T14:23:11Z")
 
     def test_player_record_requires_a_name(self):
         from pydantic import ValidationError
-        from shared import PlayerRecord
+
+        from canonical.models import PlayerRecord
 
         with pytest.raises(ValidationError):
             PlayerRecord(id="x", visibility="public", updated_at="2026-05-02T14:23:11Z")
 
     def test_player_record_accepts_nickname_only(self):
-        from shared import PlayerRecord
+        from canonical.models import PlayerRecord
 
         p = PlayerRecord(id="x", nickname="Pelé", visibility="public", updated_at="2026-05-02T14:23:11Z")
         assert p.nickname == "Pelé"
 
     def test_player_record_accepts_firstname_lastname(self):
-        from shared import PlayerRecord
+        from canonical.models import PlayerRecord
 
         p = PlayerRecord(
             id="x",
@@ -720,7 +764,7 @@ class TestPydanticModels:
         assert p.firstName == "Test"
 
     def test_player_record_round_trips_unknown_fields(self):
-        from shared import PlayerRecord
+        from canonical.models import PlayerRecord
 
         p = PlayerRecord.model_validate(
             {

@@ -11,9 +11,9 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "terraform" / "modules" / "functions" / "src"))
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from shared import MatchEntry, PlayerRecord  # noqa: E402
+from canonical.models import MatchEntry, PlayerRecord  # noqa: E402
 
 SCHEMAS_DIR = REPO_ROOT / "schemas"
 

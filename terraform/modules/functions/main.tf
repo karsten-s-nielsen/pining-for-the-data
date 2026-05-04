@@ -67,7 +67,7 @@ resource "aws_lambda_function" "list_providers" {
   runtime                        = "python3.12"
   memory_size                    = 128
   timeout                        = 10
-  reserved_concurrent_executions = 5
+  reserved_concurrent_executions = -1 # unreserved (account-wide concurrency limit is 10; cannot reserve any without dropping unreserved below 10-min)
   filename                       = data.archive_file.lambda_zip.output_path
   source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
 
@@ -92,7 +92,7 @@ resource "aws_lambda_function" "list_matches" {
   runtime                        = "python3.12"
   memory_size                    = 128
   timeout                        = 10
-  reserved_concurrent_executions = 5
+  reserved_concurrent_executions = -1 # unreserved (account-wide concurrency limit is 10; cannot reserve any without dropping unreserved below 10-min)
   filename                       = data.archive_file.lambda_zip.output_path
   source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
 
@@ -117,7 +117,7 @@ resource "aws_lambda_function" "get_artifact" {
   runtime                        = "python3.12"
   memory_size                    = 128
   timeout                        = 10
-  reserved_concurrent_executions = 5
+  reserved_concurrent_executions = -1 # unreserved (account-wide concurrency limit is 10; cannot reserve any without dropping unreserved below 10-min)
   filename                       = data.archive_file.lambda_zip.output_path
   source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
 
@@ -162,7 +162,7 @@ resource "aws_lambda_function" "list_players" {
   runtime                        = "python3.12"
   memory_size                    = 128
   timeout                        = 10
-  reserved_concurrent_executions = 5
+  reserved_concurrent_executions = -1 # unreserved (account-wide concurrency limit is 10; cannot reserve any without dropping unreserved below 10-min)
   filename                       = data.archive_file.lambda_zip.output_path
   source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
 
@@ -187,7 +187,7 @@ resource "aws_lambda_function" "get_player" {
   runtime                        = "python3.12"
   memory_size                    = 128
   timeout                        = 10
-  reserved_concurrent_executions = 5
+  reserved_concurrent_executions = -1 # unreserved (account-wide concurrency limit is 10; cannot reserve any without dropping unreserved below 10-min)
   filename                       = data.archive_file.lambda_zip.output_path
   source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
 

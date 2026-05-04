@@ -24,18 +24,12 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 import boto3
 
-# Make the Pydantic models in shared.py importable.
-_SHARED_DIR = Path(__file__).resolve().parents[2] / "terraform" / "modules" / "functions" / "src"
-if str(_SHARED_DIR) not in sys.path:
-    sys.path.insert(0, str(_SHARED_DIR))
-
-from shared import PlayerRecord  # type: ignore[import-not-found]  # noqa: E402
+from canonical.models import PlayerRecord
 
 _SAFE_PARAM = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 

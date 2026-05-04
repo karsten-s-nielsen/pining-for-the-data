@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a two-tier auth model (public + owner) to the mock provider API, expose private match data and a player reference resource (`/players`), enable CloudTrail audit logging, and load the PFF FIFA World Cup 2022 dataset (67 matches + 2,322 players) as the first restricted-tier content.
+**Goal:** Add a two-tier auth model (public + owner) to the mock provider API, expose private match data and a player reference resource (`/players`), enable CloudTrail audit logging, and load the PFF FIFA World Cup 2022 dataset (64 matches + 2,322 players) as the first restricted-tier content.
 
 **Architecture:** A second bearer token (`owner`), stored in SSM Parameter Store, is accepted by every Lambda alongside the existing public token. `validate_token` returns a tier (`PUBLIC` or `OWNER`) used to filter list responses and enforce uniform-404 on artifact/player retrieval for tier mismatches. Match visibility is recorded per-entry in `matches.json`; private matches and the private player index live under a reserved `_private/` S3 prefix for defense in depth. A new resource family `/players` follows the same shape as `/matches`. CloudTrail data events on the data bucket land in a separate audit bucket with a 365-day retention policy.
 
@@ -3733,7 +3733,7 @@ git commit -m "feat(terraform): add CloudTrail data events on data bucket with a
 **Files:**
 - Create: `scripts/upload_pff_wc2022.py`
 
-Goal: idempotent one-shot script that reads the PFF source folder, reshapes per-match files, calls `upload_game` for each of the 67 matches, and `upload_players` for the player catalogue.
+Goal: idempotent one-shot script that reads the PFF source folder, reshapes per-match files, calls `upload_game` for each of the 64 matches, and `upload_players` for the player catalogue.
 
 - [ ] **Step 1: Write the script**
 
@@ -3946,7 +3946,7 @@ print('First 3:', ids[:3])
 "
 ```
 
-Expected: `Found 67 match(es)` and three numeric IDs.
+Expected: `Found 64 match(es)` and three numeric IDs.
 
 - [ ] **Step 4: Commit**
 
@@ -4036,7 +4036,7 @@ Expected: 1 match entry with `"id": "$PFF_SMOKE_MATCH_ID"`, `"visibility": "priv
 
 **Prerequisite:** Phase 1–5 deployed; SSM owner token set. No licence gate (spec §8.3).
 
-- [ ] **Step 1: Upload all 67 matches plus the player catalogue**
+- [ ] **Step 1: Upload all 64 matches plus the player catalogue**
 
 ```bash
 BUCKET=$(cd terraform/environments/dev && terraform output -raw bucket_name)
@@ -4045,9 +4045,9 @@ python scripts/upload_pff_wc2022.py \
   --bucket "$BUCKET"
 ```
 
-Expected: 67 matches uploaded, players catalogue uploaded (canonical-JSON normalisation runs in a temp directory before `pining-upload-players` is invoked). Total runtime: 5-15 minutes depending on bandwidth (5.3 GB).
+Expected: 64 matches uploaded, players catalogue uploaded (canonical-JSON normalisation runs in a temp directory before `pining-upload-players` is invoked). Total runtime: 5-15 minutes depending on bandwidth (5.3 GB).
 
-- [ ] **Step 2: Verify owner token sees 67 matches**
+- [ ] **Step 2: Verify owner token sees 64 matches**
 
 ```bash
 API=$(cd terraform/environments/dev && terraform output -raw api_url)
@@ -4115,7 +4115,7 @@ python scripts/verify_pff_load.py \
   --public-token "$PUB"
 ```
 
-Expected: exits 0 with a summary like `OK: 67 matches, 2322 players; 5/5 artifact spot-checks pass; 3/3 player spot-checks pass; public-tier sees 0 matches, 0 players, pff in providers list`. Exits non-zero on ANY post-condition failure (count mismatch, visibility leak, artifact 404, player record missing).
+Expected: exits 0 with a summary like `OK: 64 matches, 2322 players; 5/5 artifact spot-checks pass; 3/3 player spot-checks pass; public-tier sees 0 matches, 0 players, pff in providers list`. Exits non-zero on ANY post-condition failure (count mismatch, visibility leak, artifact 404, player record missing).
 
 - [ ] **Step 9: No commit (operational task)**
 

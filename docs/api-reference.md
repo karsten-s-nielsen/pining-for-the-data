@@ -297,4 +297,4 @@ Canonical JSON Schemas for the index entry shapes are published in `schemas/` an
 - `schemas/matches.schema.json` (URN `urn:pining-for-the-data:schema:matches:v1`)
 - `schemas/players.schema.json` (URN `urn:pining-for-the-data:schema:players:v1`)
 
-Generated from the Pydantic models in `terraform/modules/functions/src/shared.py` via `python scripts/regenerate_schemas.py`. Both schemas embed `$id` (URN) and `$schema` (Draft 2020-12) metadata so consumers can pin to schema identity. The contract is **additive only**: fields are added; never removed or renamed (see spec §9).
+Generated from the Pydantic models in `src/canonical/models.py` via `python scripts/regenerate_schemas.py`. Both schemas embed `$id` (URN) and `$schema` (Draft 2020-12) metadata so consumers can pin to schema identity. The contract is **additive only**: fields are added; never removed or renamed (see spec §9). The models live outside `terraform/modules/functions/src/` so the Lambda zip remains dependency-free (no pydantic at runtime; handlers consume already-validated dict payloads from S3).

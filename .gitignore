@@ -24,7 +24,6 @@ ENV/
 htmlcov/
 
 # Pre-commit
-.secrets.baseline
 
 # Ruff
 .ruff_cache/
@@ -40,7 +39,7 @@ terraform/modules/functions/lambda.zip
 *.tfstate
 *.tfstate.*
 .terraform/
-.terraform.lock.hcl
+terraform/modules/**/.terraform.lock.hcl
 terraform.tfvars
 
 # OS

@@ -7,14 +7,18 @@ import os
 
 from shared import (
     Tier,
+    apply_filters,
     get_s3_client,
     json_response,
     logger,
+    parse_query_filters,
     validate_path_param,
     validate_token,
 )
 
 BUCKET = os.environ.get("DATA_BUCKET", "")
+
+_ALLOWED_FILTERS = {"updatedSince"}
 
 
 def handler(event: dict, context: object) -> dict:
@@ -23,6 +27,9 @@ def handler(event: dict, context: object) -> dict:
     Gates on providers.json membership for unknown-provider 404 (spec §6.4).
     Owner-tier merge applies private-wins precedence on cross-tier ID
     collision (spec §6.3.1).
+
+    Query filters (spec: 2026-05-07-query-parameter-filtering §3.1):
+    Only updatedSince is supported. dateFrom/dateTo return 400.
     """
     tier = validate_token(event)
     if isinstance(tier, dict):
@@ -34,6 +41,10 @@ def handler(event: dict, context: object) -> dict:
     if param_error:
         logger.warning("validation_failure", extra={"handler": "list_players", "param": "provider"})
         return param_error
+
+    filters = parse_query_filters(event, allowed=_ALLOWED_FILTERS)
+    if isinstance(filters, dict) and "statusCode" in filters:
+        return filters
 
     s3 = get_s3_client()
     if not _provider_known(s3, provider):
@@ -53,7 +64,9 @@ def handler(event: dict, context: object) -> dict:
         if isinstance(pid, str):
             by_id[pid] = priv  # overwrite any same-id public entry
 
-    return json_response(200, {"provider": provider, "players": list(by_id.values())})
+    players = apply_filters(list(by_id.values()), filters)
+
+    return json_response(200, {"provider": provider, "players": players})
 
 
 def _provider_known(s3, provider: str) -> bool:

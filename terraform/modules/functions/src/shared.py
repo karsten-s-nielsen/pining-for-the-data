@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 from enum import StrEnum
 
 import boto3
@@ -146,3 +147,80 @@ def redirect_response(url: str) -> dict:
 
 def _error_response(status_code: int, message: str) -> dict:
     return json_response(status_code, {"error": message})
+
+
+# ----- Query parameter filtering (spec: 2026-05-07-query-parameter-filtering §3) -----
+
+_KNOWN_FILTERS = {"updatedSince", "dateFrom", "dateTo"}
+
+_ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_iso8601(value: str) -> bool:
+    """Check that value looks like YYYY-MM-DDTHH:MM:SSZ and represents a real date."""
+    if not _ISO8601_RE.match(value):
+        return False
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_date(value: str) -> bool:
+    """Check that value looks like YYYY-MM-DD and represents a real date."""
+    if not _DATE_RE.match(value):
+        return False
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+
+def parse_query_filters(event: dict, *, allowed: set[str]) -> dict:
+    """Extract and validate query-string filter parameters.
+
+    Returns a dict of ``{param_name: validated_value}`` on success, or an
+    API Gateway error response dict (400) on validation failure.  Unknown
+    query params are silently ignored; *known* params not in ``allowed``
+    return 400 (e.g. ``dateFrom`` on ``list_players``).
+    """
+    qs = event.get("queryStringParameters") or {}
+    filters: dict[str, str] = {}
+
+    for key, value in qs.items():
+        if key not in _KNOWN_FILTERS:
+            continue  # silently ignore unrecognised params
+        if key not in allowed:
+            return _error_response(400, f"Filter '{key}' is not supported on this endpoint")
+        if key == "updatedSince":
+            if not _validate_iso8601(value):
+                return _error_response(
+                    400, f"Invalid {key}: expected ISO 8601 UTC timestamp (e.g., 2026-05-01T00:00:00Z)"
+                )
+        elif key in ("dateFrom", "dateTo"):
+            if not _validate_date(value):
+                return _error_response(400, f"Invalid {key}: expected YYYY-MM-DD")
+        filters[key] = value
+
+    return filters
+
+
+def apply_filters(records: list[dict], filters: dict[str, str]) -> list[dict]:
+    """Apply parsed query filters to a list of records. Spec §3.3-3.4."""
+    if not filters:
+        return records
+
+    result = records
+    if "updatedSince" in filters:
+        threshold = filters["updatedSince"]
+        result = [r for r in result if (r.get("updated_at") or "") > threshold]
+    if "dateFrom" in filters:
+        threshold = filters["dateFrom"]
+        result = [r for r in result if (r.get("date") or "") >= threshold]
+    if "dateTo" in filters:
+        threshold = filters["dateTo"]
+        result = [r for r in result if "" < (r.get("date") or "") < threshold]
+    return result

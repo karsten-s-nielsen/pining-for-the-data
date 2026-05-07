@@ -151,6 +151,200 @@ class TestSafeParam:
         assert validate_path_param("123", "id") is None
 
 
+# ----- Query filter parsing -----
+
+
+class TestParseQueryFilters:
+    def test_no_params_returns_empty_filters(self) -> None:
+        from shared import parse_query_filters
+
+        result = parse_query_filters({}, allowed={"updatedSince", "dateFrom", "dateTo"})
+        assert result == {}
+
+    def test_null_query_string_returns_empty_filters(self) -> None:
+        from shared import parse_query_filters
+
+        event = {"queryStringParameters": None}
+        result = parse_query_filters(event, allowed={"updatedSince", "dateFrom", "dateTo"})
+        assert result == {}
+
+    def test_valid_updated_since(self) -> None:
+        from shared import parse_query_filters
+
+        event = {"queryStringParameters": {"updatedSince": "2026-05-01T00:00:00Z"}}
+        result = parse_query_filters(event, allowed={"updatedSince"})
+        assert result == {"updatedSince": "2026-05-01T00:00:00Z"}
+
+    def test_valid_date_from(self) -> None:
+        from shared import parse_query_filters
+
+        event = {"queryStringParameters": {"dateFrom": "2022-11-20"}}
+        result = parse_query_filters(event, allowed={"dateFrom", "dateTo"})
+        assert result == {"dateFrom": "2022-11-20"}
+
+    def test_valid_date_to(self) -> None:
+        from shared import parse_query_filters
+
+        event = {"queryStringParameters": {"dateTo": "2022-12-19"}}
+        result = parse_query_filters(event, allowed={"dateFrom", "dateTo"})
+        assert result == {"dateTo": "2022-12-19"}
+
+    def test_all_three_combined(self) -> None:
+        from shared import parse_query_filters
+
+        event = {
+            "queryStringParameters": {
+                "updatedSince": "2026-05-01T00:00:00Z",
+                "dateFrom": "2022-11-20",
+                "dateTo": "2022-12-19",
+            }
+        }
+        result = parse_query_filters(event, allowed={"updatedSince", "dateFrom", "dateTo"})
+        assert result == {
+            "updatedSince": "2026-05-01T00:00:00Z",
+            "dateFrom": "2022-11-20",
+            "dateTo": "2022-12-19",
+        }
+
+    def test_invalid_updated_since_returns_400(self) -> None:
+        from shared import parse_query_filters
+
+        event = {"queryStringParameters": {"updatedSince": "not-a-date"}}
+        result = parse_query_filters(event, allowed={"updatedSince"})
+        assert isinstance(result, dict)
+        assert result["statusCode"] == 400
+        assert "updatedSince" in json.loads(result["body"])["error"]
+
+    def test_invalid_date_from_returns_400(self) -> None:
+        from shared import parse_query_filters
+
+        event = {"queryStringParameters": {"dateFrom": "2022-13-45"}}
+        result = parse_query_filters(event, allowed={"dateFrom", "dateTo"})
+        assert isinstance(result, dict)
+        assert result["statusCode"] == 400
+        assert "dateFrom" in json.loads(result["body"])["error"]
+
+    def test_invalid_date_to_returns_400(self) -> None:
+        from shared import parse_query_filters
+
+        event = {"queryStringParameters": {"dateTo": "yesterday"}}
+        result = parse_query_filters(event, allowed={"dateFrom", "dateTo"})
+        assert isinstance(result, dict)
+        assert result["statusCode"] == 400
+        assert "dateTo" in json.loads(result["body"])["error"]
+
+    def test_disallowed_param_returns_400(self) -> None:
+        from shared import parse_query_filters
+
+        event = {"queryStringParameters": {"dateFrom": "2022-11-20"}}
+        result = parse_query_filters(event, allowed={"updatedSince"})
+        assert isinstance(result, dict)
+        assert result["statusCode"] == 400
+        assert "dateFrom" in json.loads(result["body"])["error"]
+
+    def test_unrecognised_params_silently_ignored(self) -> None:
+        from shared import parse_query_filters
+
+        event = {"queryStringParameters": {"randomJunk": "hello", "updatedSince": "2026-05-01T00:00:00Z"}}
+        result = parse_query_filters(event, allowed={"updatedSince"})
+        assert result == {"updatedSince": "2026-05-01T00:00:00Z"}
+
+
+class TestApplyFilters:
+    def test_updated_since_exclusive(self) -> None:
+        from shared import apply_filters
+
+        records = [
+            {"id": "a", "updated_at": "2026-05-01T00:00:00Z"},
+            {"id": "b", "updated_at": "2026-05-02T00:00:00Z"},
+            {"id": "c", "updated_at": "2026-05-03T00:00:00Z"},
+        ]
+        result = apply_filters(records, {"updatedSince": "2026-05-01T00:00:00Z"})
+        assert [r["id"] for r in result] == ["b", "c"]
+
+    def test_date_from_inclusive(self) -> None:
+        from shared import apply_filters
+
+        records = [
+            {"id": "a", "date": "2022-11-20"},
+            {"id": "b", "date": "2022-11-21"},
+            {"id": "c", "date": "2022-11-19"},
+        ]
+        result = apply_filters(records, {"dateFrom": "2022-11-20"})
+        assert [r["id"] for r in result] == ["a", "b"]
+
+    def test_date_to_exclusive(self) -> None:
+        from shared import apply_filters
+
+        records = [
+            {"id": "a", "date": "2022-11-20"},
+            {"id": "b", "date": "2022-11-21"},
+            {"id": "c", "date": "2022-11-22"},
+        ]
+        result = apply_filters(records, {"dateTo": "2022-11-21"})
+        assert [r["id"] for r in result] == ["a"]
+
+    def test_date_from_and_date_to_combined(self) -> None:
+        from shared import apply_filters
+
+        records = [
+            {"id": "a", "date": "2022-11-19"},
+            {"id": "b", "date": "2022-11-20"},
+            {"id": "c", "date": "2022-11-21"},
+            {"id": "d", "date": "2022-11-22"},
+        ]
+        result = apply_filters(records, {"dateFrom": "2022-11-20", "dateTo": "2022-11-22"})
+        assert [r["id"] for r in result] == ["b", "c"]
+
+    def test_all_three_filters_combined(self) -> None:
+        from shared import apply_filters
+
+        records = [
+            {"id": "a", "date": "2022-11-20", "updated_at": "2026-04-30T00:00:00Z"},
+            {"id": "b", "date": "2022-11-20", "updated_at": "2026-05-02T00:00:00Z"},
+            {"id": "c", "date": "2022-11-25", "updated_at": "2026-05-02T00:00:00Z"},
+            {"id": "d", "date": "2022-12-01", "updated_at": "2026-05-02T00:00:00Z"},
+        ]
+        result = apply_filters(
+            records,
+            {
+                "updatedSince": "2026-05-01T00:00:00Z",
+                "dateFrom": "2022-11-20",
+                "dateTo": "2022-11-30",
+            },
+        )
+        # a: updated_at too old; b: passes all; c: passes all; d: date too late
+        assert [r["id"] for r in result] == ["b", "c"]
+
+    def test_null_date_excluded_when_date_from_active(self) -> None:
+        from shared import apply_filters
+
+        records = [
+            {"id": "a", "date": "2022-11-20"},
+            {"id": "b"},  # no date field at all
+            {"id": "c", "date": None},
+        ]
+        result = apply_filters(records, {"dateFrom": "2022-11-01"})
+        assert [r["id"] for r in result] == ["a"]
+
+    def test_null_updated_at_excluded_when_updated_since_active(self) -> None:
+        from shared import apply_filters
+
+        records = [
+            {"id": "a", "updated_at": "2026-05-02T00:00:00Z"},
+            {"id": "b"},  # no updated_at
+        ]
+        result = apply_filters(records, {"updatedSince": "2026-05-01T00:00:00Z"})
+        assert [r["id"] for r in result] == ["a"]
+
+    def test_empty_filters_returns_all(self) -> None:
+        from shared import apply_filters
+
+        records = [{"id": "a"}, {"id": "b"}]
+        result = apply_filters(records, {})
+        assert [r["id"] for r in result] == ["a", "b"]
+
+
 # ----- list_providers (tier-blind, spec §4.2) -----
 
 
@@ -266,6 +460,149 @@ class TestListMatches:
         }
         result = handler(event, None)
         assert result["statusCode"] == 404
+
+
+# ----- list_matches filtering (query parameters) -----
+
+
+class TestListMatchesFiltering:
+    def _payload(self):
+        return {
+            "provider": "sc",
+            "matches": [
+                {
+                    "id": "m1",
+                    "date": "2024-11-30",
+                    "updated_at": "2026-05-01T00:00:00Z",
+                    "artifacts": {"match": "match.json"},
+                    "visibility": "public",
+                },
+                {
+                    "id": "m2",
+                    "date": "2024-12-07",
+                    "updated_at": "2026-05-02T00:00:00Z",
+                    "artifacts": {"match": "match.json"},
+                    "visibility": "public",
+                },
+                {
+                    "id": "m3",
+                    "date": "2024-12-21",
+                    "updated_at": "2026-05-03T00:00:00Z",
+                    "artifacts": {"match": "match.json"},
+                    "visibility": "public",
+                },
+                {
+                    "id": "m4",
+                    "date": "2024-12-21",
+                    "updated_at": "2026-05-03T00:00:00Z",
+                    "artifacts": {"match": "match.json"},
+                    "visibility": "private",
+                },
+            ],
+        }
+
+    def test_updated_since_filters_matches(self) -> None:
+        from list_matches import handler
+
+        mock_s3 = _mock_s3()
+        mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=json.dumps(self._payload()).encode()))
+        }
+
+        event = {
+            "headers": {"authorization": "Bearer own-tok"},
+            "pathParameters": {"provider": "sc"},
+            "queryStringParameters": {"updatedSince": "2026-05-01T00:00:00Z"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        ids = [m["id"] for m in json.loads(result["body"])["matches"]]
+        assert ids == ["m2", "m3", "m4"]
+
+    def test_date_from_filters_matches(self) -> None:
+        from list_matches import handler
+
+        mock_s3 = _mock_s3()
+        mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=json.dumps(self._payload()).encode()))
+        }
+
+        event = {
+            "headers": {"authorization": "Bearer own-tok"},
+            "pathParameters": {"provider": "sc"},
+            "queryStringParameters": {"dateFrom": "2024-12-07"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        ids = [m["id"] for m in json.loads(result["body"])["matches"]]
+        assert ids == ["m2", "m3", "m4"]
+
+    def test_date_to_filters_matches(self) -> None:
+        from list_matches import handler
+
+        mock_s3 = _mock_s3()
+        mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=json.dumps(self._payload()).encode()))
+        }
+
+        event = {
+            "headers": {"authorization": "Bearer own-tok"},
+            "pathParameters": {"provider": "sc"},
+            "queryStringParameters": {"dateTo": "2024-12-07"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        ids = [m["id"] for m in json.loads(result["body"])["matches"]]
+        assert ids == ["m1"]
+
+    def test_no_filters_returns_all_backwards_compat(self) -> None:
+        from list_matches import handler
+
+        mock_s3 = _mock_s3()
+        mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=json.dumps(self._payload()).encode()))
+        }
+
+        event = {
+            "headers": {"authorization": "Bearer own-tok"},
+            "pathParameters": {"provider": "sc"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        assert len(json.loads(result["body"])["matches"]) == 4
+
+    def test_visibility_filter_applied_before_query_filters(self) -> None:
+        from list_matches import handler
+
+        mock_s3 = _mock_s3()
+        mock_s3.get_object.return_value = {
+            "Body": MagicMock(read=MagicMock(return_value=json.dumps(self._payload()).encode()))
+        }
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc"},
+            "queryStringParameters": {"dateFrom": "2024-12-21"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        ids = [m["id"] for m in json.loads(result["body"])["matches"]]
+        # m3 is public + matches date; m4 is private, filtered out by visibility
+        assert ids == ["m3"]
+
+    def test_invalid_updated_since_returns_400(self) -> None:
+        from list_matches import handler
+
+        _mock_s3()  # inject mock; return value unused — handler rejects before S3 call
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc"},
+            "queryStringParameters": {"updatedSince": "not-a-date"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 400
+        assert "updatedSince" in json.loads(result["body"])["error"]
 
 
 # ----- get_artifact (object-form artifacts, no list_objects) -----
@@ -561,6 +898,100 @@ class TestListPlayers(_PlayersWiring):
         body = json.loads(result["body"])
         assert len(body["players"]) == 1
         assert body["players"][0]["nickname"] == "Private Real"
+
+
+class TestListPlayersFiltering(_PlayersWiring):
+    def test_updated_since_filters_players(self) -> None:
+        from list_players import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(
+            mock_s3,
+            public_payload={
+                "provider": "sc",
+                "players": [
+                    {"id": "p1", "nickname": "Old", "updated_at": "2026-05-01T00:00:00Z"},
+                    {"id": "p2", "nickname": "New", "updated_at": "2026-05-03T00:00:00Z"},
+                ],
+            },
+        )
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc"},
+            "queryStringParameters": {"updatedSince": "2026-05-02T00:00:00Z"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        ids = [p["id"] for p in json.loads(result["body"])["players"]]
+        assert ids == ["p2"]
+
+    def test_date_from_on_players_returns_400(self) -> None:
+        from list_players import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(mock_s3)
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc"},
+            "queryStringParameters": {"dateFrom": "2022-11-20"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 400
+        assert "dateFrom" in json.loads(result["body"])["error"]
+
+    def test_date_to_on_players_returns_400(self) -> None:
+        from list_players import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(mock_s3)
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc"},
+            "queryStringParameters": {"dateTo": "2022-12-19"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 400
+        assert "dateTo" in json.loads(result["body"])["error"]
+
+    def test_no_filters_returns_all_backwards_compat(self) -> None:
+        from list_players import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(
+            mock_s3,
+            public_payload={
+                "provider": "sc",
+                "players": [
+                    {"id": "p1", "nickname": "A"},
+                    {"id": "p2", "nickname": "B"},
+                ],
+            },
+        )
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 200
+        assert len(json.loads(result["body"])["players"]) == 2
+
+    def test_invalid_updated_since_returns_400(self) -> None:
+        from list_players import handler
+
+        mock_s3 = _mock_s3()
+        self._wire(mock_s3)
+
+        event = {
+            "headers": {"authorization": "Bearer pub-tok"},
+            "pathParameters": {"provider": "sc"},
+            "queryStringParameters": {"updatedSince": "garbage"},
+        }
+        result = handler(event, None)
+        assert result["statusCode"] == 400
 
 
 class TestGetPlayer(_PlayersWiring):

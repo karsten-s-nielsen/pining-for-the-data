@@ -18,7 +18,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
 
             apiGateway = container "API Gateway" "REST API with bearer token auth, throttled (10 rps / 50 burst)" "AWS API Gateway HTTP API"
             lambdaProviders = container "list_providers Lambda" "Returns provider catalogue (tier-blind)" "AWS Lambda, Python 3.12"
-            lambdaMatches = container "list_matches Lambda" "Returns match index for a provider, filtered by tier" "AWS Lambda, Python 3.12"
+            lambdaMatches = container "list_matches Lambda" "Returns match index for a provider; tier-filtered with optional query params (updatedSince, dateFrom, dateTo)" "AWS Lambda, Python 3.12"
             lambdaArtifact = container "get_artifact Lambda" "Looks up filename via artifacts dict (object form) or falls back to S3 list (legacy array form); returns 302 + presigned URL" "AWS Lambda, Python 3.12" {
                 validateToken = component "validate_token" "Returns Tier.PUBLIC / Tier.OWNER / 401; PUBLIC on duplicate (fail closed)" "Python function, hmac.compare_digest"
                 ownerTokenFetcher = component "_get_owner_token" "Fetches owner token from SSM; functools.cache for warm-container lifetime" "Python, boto3 SSM"
@@ -26,7 +26,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
                 artifactResolver = component "Artifact resolver" "Object-form: dict lookup. Legacy array-form: S3 list fallback (backwards-compat for pre-refactor data)" "Python, dict + boto3"
                 presignBuilder = component "Presigned URL builder" "S3 generate_presigned_url with SigV4 signing" "boto3, KMS-aware"
             }
-            lambdaPlayers = container "list_players Lambda" "Provider-gated 404 + tier-aware merge with private-wins precedence" "AWS Lambda, Python 3.12"
+            lambdaPlayers = container "list_players Lambda" "Provider-gated 404 + tier-aware merge with private-wins precedence; supports updatedSince filtering" "AWS Lambda, Python 3.12"
             lambdaPlayer = container "get_player Lambda" "Single record lookup; provider-gated; private-wins precedence" "AWS Lambda, Python 3.12"
 
             dataBucket = container "Data Bucket (S3)" "Tracking files; public content at {provider}/...; private at {provider}/_private/...; SSE-KMS; versioned" "AWS S3" "Database"
@@ -74,7 +74,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         apiGateway -> lambdaPlayer "GET /v1/{provider}/players/{id}" "Lambda proxy"
 
         lambdaProviders -> dataBucket "Reads providers.json" "S3 GetObject"
-        lambdaMatches -> dataBucket "Reads {provider}/matches.json; filters by Tier" "S3 GetObject"
+        lambdaMatches -> dataBucket "Reads {provider}/matches.json; filters by tier + query params" "S3 GetObject"
         lambdaArtifact -> dataBucket "Reads matches.json then presigns artifact filename" "S3 GetObject + generate_presigned_url"
         lambdaPlayers -> dataBucket "Reads providers.json + players.json indexes (public + _private for OWNER)" "S3 GetObject"
         lambdaPlayer -> dataBucket "Same as list_players; finds by id with private-wins precedence" "S3 GetObject"

@@ -63,6 +63,31 @@ Returns games and their artifact maps for a provider, **filtered by tier**.
 |-----------|------|-------------|
 | `provider` | string | Provider name (must match `^[a-zA-Z0-9][a-zA-Z0-9_-]*$`) |
 
+**Query parameters** (all optional, combined with AND logic)
+
+| Parameter | Format | Semantics | Field filtered |
+|-----------|--------|-----------|----------------|
+| `updatedSince` | ISO 8601 UTC (e.g., `2026-05-01T00:00:00Z`) | Exclusive: `updated_at > value` | `updated_at` |
+| `dateFrom` | `YYYY-MM-DD` | Inclusive: `date >= value` | `date` |
+| `dateTo` | `YYYY-MM-DD` | Exclusive: `date < value` | `date` |
+
+Records where the filtered field is `null` or missing are excluded when that filter is active. Unrecognised query parameters are silently ignored.
+
+**Incremental polling pattern:**
+
+```bash
+# First poll — get everything
+curl -H "Authorization: Bearer $TOKEN" "$API_URL/v1/skillcorner/matches"
+
+# Subsequent polls — only records updated after last poll
+curl -H "Authorization: Bearer $TOKEN" \
+  "$API_URL/v1/skillcorner/matches?updatedSince=2026-05-01T00:00:00Z"
+
+# Date range
+curl -H "Authorization: Bearer $TOKEN" \
+  "$API_URL/v1/skillcorner/matches?dateFrom=2022-11-20&dateTo=2022-12-19"
+```
+
 **Response** `200 OK`
 
 ```json
@@ -97,6 +122,9 @@ Returns games and their artifact maps for a provider, **filtered by tier**.
 | Status | Body | Cause |
 |--------|------|-------|
 | `400` | `{"error": "Invalid provider: ..."}` | Path param fails the safe-character allowlist |
+| `400` | `{"error": "Invalid updatedSince: ..."}` | `updatedSince` not parseable as ISO 8601 |
+| `400` | `{"error": "Invalid dateFrom: ..."}` | `dateFrom` not parseable as YYYY-MM-DD |
+| `400` | `{"error": "Invalid dateTo: ..."}` | `dateTo` not parseable as YYYY-MM-DD |
 | `401` | `{"error": "Missing or malformed Authorization header"}` | No `Authorization: Bearer <token>` header present |
 | `401` | `{"error": "Invalid token"}` | Token does not match either configured value |
 | `404` | `{"error": "Provider not found"}` | No `matches.json` exists for this provider |
@@ -149,6 +177,14 @@ Returns the player reference catalogue for a provider, **filtered by tier**. Pro
 |-----------|------|-------------|
 | `provider` | string | Provider name |
 
+**Query parameters** (optional)
+
+| Parameter | Format | Semantics | Field filtered |
+|-----------|--------|-----------|----------------|
+| `updatedSince` | ISO 8601 UTC (e.g., `2026-05-01T00:00:00Z`) | Exclusive: `updated_at > value` | `updated_at` |
+
+`dateFrom` and `dateTo` are **not supported** on this endpoint (players have no `date` field). Passing either returns `400`.
+
 **Reserved query parameters** (ignored in v1, reserved for future pagination): `?limit=`, `?offset=`, `?cursor=`, `?team_id=`, `?competition_id=`. v1 catalogues fit the Lambda 6 MB sync response cap.
 
 **Response** `200 OK`
@@ -188,6 +224,8 @@ The canonical `PlayerRecord` shape: required `id` + (`nickname` OR `firstName`+`
 
 | Status | Body | Cause |
 |--------|------|-------|
+| `400` | `{"error": "Filter 'dateFrom' is not supported on this endpoint"}` | `dateFrom` or `dateTo` passed to players endpoint |
+| `400` | `{"error": "Invalid updatedSince: ..."}` | `updatedSince` not parseable as ISO 8601 |
 | `401` | `{"error": "..."}` | Auth failure (same as other endpoints) |
 | `404` | `{"error": "Provider not found"}` | Provider not registered in `providers.json` |
 

@@ -5,9 +5,20 @@ from __future__ import annotations
 import json
 import os
 
-from shared import Tier, get_s3_client, json_response, logger, validate_path_param, validate_token
+from shared import (
+    Tier,
+    apply_filters,
+    get_s3_client,
+    json_response,
+    logger,
+    parse_query_filters,
+    validate_path_param,
+    validate_token,
+)
 
 BUCKET = os.environ.get("DATA_BUCKET", "")
+
+_ALLOWED_FILTERS = {"updatedSince", "dateFrom", "dateTo"}
 
 
 def handler(event: dict, context: object) -> dict:
@@ -17,6 +28,9 @@ def handler(event: dict, context: object) -> dict:
     missing, treated as public). OWNER tier sees all entries. Empty filtered
     list returns 200 with `{"matches": []}` — not 404 — so the public tier
     cannot probe for the existence of any private matches.
+
+    Query filters (spec: 2026-05-07-query-parameter-filtering §3):
+    updatedSince, dateFrom, dateTo applied after visibility filtering.
     """
     tier = validate_token(event)
     if isinstance(tier, dict):
@@ -29,6 +43,10 @@ def handler(event: dict, context: object) -> dict:
         logger.warning("validation_failure", extra={"handler": "list_matches", "param": "provider"})
         return param_error
 
+    filters = parse_query_filters(event, allowed=_ALLOWED_FILTERS)
+    if isinstance(filters, dict) and "statusCode" in filters:
+        return filters
+
     s3 = get_s3_client()
     key = f"{provider}/matches.json"
     try:
@@ -40,9 +58,12 @@ def handler(event: dict, context: object) -> dict:
         logger.exception("s3_error", extra={"handler": "list_matches"})
         return json_response(500, {"error": "Internal server error"})
 
+    match_list = matches.get("matches", [])
+
     if tier != Tier.OWNER:
         # Filter to public entries (missing `visibility` field defaults to public).
-        filtered = [m for m in matches.get("matches", []) if m.get("visibility", "public") == "public"]
-        matches = {**matches, "matches": filtered}
+        match_list = [m for m in match_list if m.get("visibility", "public") == "public"]
 
-    return json_response(200, matches)
+    match_list = apply_filters(match_list, filters)
+
+    return json_response(200, {**matches, "matches": match_list})

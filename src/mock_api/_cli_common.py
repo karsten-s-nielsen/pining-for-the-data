@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any
 
 # Same rule as the API-side validator: no leading underscore (reserved namespace).
 SAFE_PARAM = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
@@ -26,7 +28,7 @@ def utc_now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def handle_cli_errors(parser, func, *args, **kwargs):
+def handle_cli_errors(parser, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """Run func with friendly error messages for common AWS/validation failures."""
     try:
         return func(*args, **kwargs)

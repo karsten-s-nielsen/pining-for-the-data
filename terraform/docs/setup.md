@@ -21,6 +21,41 @@ uv --version
 
 ---
 
+## Step 0: API Gateway CloudWatch Role (One-Time)
+
+API Gateway HTTP API access logging requires an account-level CloudWatch Logs role.
+This is a one-time setup per AWS account — if it's already configured, skip to Step 1.
+
+1. **Create the IAM role:**
+   - IAM → Roles → Create role
+   - Trusted entity type: **Custom trust policy**
+   - Paste:
+     ```json
+     {
+         "Version": "2012-10-17",
+         "Statement": [{
+             "Effect": "Allow",
+             "Principal": { "Service": "apigateway.amazonaws.com" },
+             "Action": "sts:AssumeRole"
+         }]
+     }
+     ```
+   - Attach policy: `AmazonAPIGatewayPushToCloudWatchLogs`
+   - Role name: `api-gateway-cloudwatch-logs`
+
+2. **Configure API Gateway:**
+   - API Gateway → Settings (left sidebar, bottom)
+   - Set **CloudWatch log role ARN** to:
+     ```
+     arn:aws:iam::<ACCOUNT_ID>:role/api-gateway-cloudwatch-logs
+     ```
+   - Save
+
+Without this, `terraform apply` will fail with "Insufficient permissions to enable logging"
+on the API Gateway stage.
+
+---
+
 ## Step 1: Bootstrap State Infrastructure
 
 The state module creates an S3 bucket and DynamoDB table for Terraform remote state.
@@ -208,6 +243,15 @@ What you'll customize:
 | AWS region | `terraform.tfvars` | `us-east-1` |
 | API token | `terraform.tfvars` | `test-token-pining-for-the-data` |
 | Provider name | `pining-upload --provider` | `skillcorner` |
+
+### CI/CD: GitHub Actions OIDC Role
+
+The Terraform Plan/Apply workflows use OIDC to assume an IAM role. The role needs:
+
+- **Trust policy:** Allow `sts:AssumeRoleWithWebIdentity` from `token.actions.githubusercontent.com` with subject `repo:<org>/<repo>:*`
+- **Permissions policy:** S3 (state bucket), KMS, IAM, Lambda, API Gateway, CloudWatch (logs, alarms, dashboards), SNS, SSM, CloudTrail, and `logs:PutResourcePolicy` / `logs:DescribeResourcePolicies` / `logs:DescribeLogGroups` for API Gateway access logging
+
+Set the role ARN as a GitHub repository variable: `AWS_OIDC_ROLE_ARN`.
 
 ### Adding a New Provider
 

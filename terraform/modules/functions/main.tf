@@ -65,7 +65,7 @@ resource "aws_lambda_function" "list_providers" {
   role                           = aws_iam_role.lambda.arn
   handler                        = "list_providers.handler"
   runtime                        = "python3.12"
-  memory_size                    = 128
+  memory_size                    = 256
   timeout                        = 10
   reserved_concurrent_executions = -1 # unreserved (account-wide concurrency limit is 10; cannot reserve any without dropping unreserved below 10-min)
   filename                       = data.archive_file.lambda_zip.output_path
@@ -90,7 +90,7 @@ resource "aws_lambda_function" "list_matches" {
   role                           = aws_iam_role.lambda.arn
   handler                        = "list_matches.handler"
   runtime                        = "python3.12"
-  memory_size                    = 128
+  memory_size                    = 256
   timeout                        = 10
   reserved_concurrent_executions = -1 # unreserved (account-wide concurrency limit is 10; cannot reserve any without dropping unreserved below 10-min)
   filename                       = data.archive_file.lambda_zip.output_path
@@ -115,7 +115,7 @@ resource "aws_lambda_function" "get_artifact" {
   role                           = aws_iam_role.lambda.arn
   handler                        = "get_artifact.handler"
   runtime                        = "python3.12"
-  memory_size                    = 128
+  memory_size                    = 256
   timeout                        = 10
   reserved_concurrent_executions = -1 # unreserved (account-wide concurrency limit is 10; cannot reserve any without dropping unreserved below 10-min)
   filename                       = data.archive_file.lambda_zip.output_path
@@ -160,7 +160,7 @@ resource "aws_lambda_function" "list_players" {
   role                           = aws_iam_role.lambda.arn
   handler                        = "list_players.handler"
   runtime                        = "python3.12"
-  memory_size                    = 128
+  memory_size                    = 256
   timeout                        = 10
   reserved_concurrent_executions = -1 # unreserved (account-wide concurrency limit is 10; cannot reserve any without dropping unreserved below 10-min)
   filename                       = data.archive_file.lambda_zip.output_path
@@ -185,7 +185,7 @@ resource "aws_lambda_function" "get_player" {
   role                           = aws_iam_role.lambda.arn
   handler                        = "get_player.handler"
   runtime                        = "python3.12"
-  memory_size                    = 128
+  memory_size                    = 256
   timeout                        = 10
   reserved_concurrent_executions = -1 # unreserved (account-wide concurrency limit is 10; cannot reserve any without dropping unreserved below 10-min)
   filename                       = data.archive_file.lambda_zip.output_path
@@ -212,6 +212,60 @@ resource "aws_cloudwatch_log_group" "list_players" {
 
 resource "aws_cloudwatch_log_group" "get_player" {
   name              = "/aws/lambda/${aws_lambda_function.get_player.function_name}"
+  retention_in_days = 30
+}
+
+# --- Health Check (minimal IAM — no S3/SSM/KMS access) ---
+
+resource "aws_iam_role" "lambda_health" {
+  name = "${var.project_name}-lambda-health"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_health_basic" {
+  role       = aws_iam_role.lambda_health.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_health_xray" {
+  role       = aws_iam_role.lambda_health.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
+resource "aws_lambda_function" "health" {
+  function_name                  = "${var.project_name}-health"
+  role                           = aws_iam_role.lambda_health.arn
+  handler                        = "health.handler"
+  runtime                        = "python3.12"
+  memory_size                    = 128
+  timeout                        = 5
+  reserved_concurrent_executions = -1
+  filename                       = data.archive_file.lambda_zip.output_path
+  source_code_hash               = data.archive_file.lambda_zip.output_base64sha256
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      LAST_ROTATION = var.last_rotation
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_group" "health" {
+  name              = "/aws/lambda/${aws_lambda_function.health.function_name}"
   retention_in_days = 30
 }
 

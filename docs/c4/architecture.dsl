@@ -19,15 +19,16 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             apiGateway = container "API Gateway" "REST API with bearer token auth, throttled (10 rps / 50 burst)" "AWS API Gateway HTTP API"
             lambdaProviders = container "list_providers Lambda" "Returns provider catalogue (tier-blind)" "AWS Lambda, Python 3.12"
             lambdaMatches = container "list_matches Lambda" "Returns match index for a provider; tier-filtered with optional query params (updatedSince, dateFrom, dateTo)" "AWS Lambda, Python 3.12"
-            lambdaArtifact = container "get_artifact Lambda" "Looks up filename via artifacts dict (object form) or falls back to S3 list (legacy array form); returns 302 + presigned URL" "AWS Lambda, Python 3.12" {
+            lambdaArtifact = container "get_artifact Lambda" "Looks up filename via artifacts dict; returns 302 + presigned URL" "AWS Lambda, Python 3.12" {
                 validateToken = component "validate_token" "Returns Tier.PUBLIC / Tier.OWNER / 401; PUBLIC on duplicate (fail closed)" "Python function, hmac.compare_digest"
                 ownerTokenFetcher = component "_get_owner_token" "Fetches owner token from SSM; functools.cache for warm-container lifetime" "Python, boto3 SSM"
                 pathValidator = component "validate_path_param" "Rejects empty / oversized / `_`-prefixed path parameters" "Python, regex"
-                artifactResolver = component "Artifact resolver" "Object-form: dict lookup. Legacy array-form: S3 list fallback (backwards-compat for pre-refactor data)" "Python, dict + boto3"
+                artifactResolver = component "Artifact resolver" "Dict lookup in artifacts object; rejects names not in the allowlist" "Python, dict"
                 presignBuilder = component "Presigned URL builder" "S3 generate_presigned_url with SigV4 signing" "boto3, KMS-aware"
             }
             lambdaPlayers = container "list_players Lambda" "Provider-gated 404 + tier-aware merge with private-wins precedence; supports updatedSince filtering" "AWS Lambda, Python 3.12"
             lambdaPlayer = container "get_player Lambda" "Single record lookup; provider-gated; private-wins precedence" "AWS Lambda, Python 3.12"
+            lambdaHealth = container "health Lambda" "Unauthenticated health check; returns 200 OK for synthetic monitoring" "AWS Lambda, Python 3.12"
 
             dataBucket = container "Data Bucket (S3)" "Tracking files; public content at {provider}/...; private at {provider}/_private/...; SSE-KMS; versioned" "AWS S3" "Database"
             auditBucket = container "Audit Bucket (S3)" "CloudTrail data events; 365-day lifecycle; SSE-KMS; versioned" "AWS S3" "Database"
@@ -36,6 +37,9 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             ssmParam = container "SSM Parameter Store" "Owner-tier bearer token (SecureString, KMS-encrypted)" "AWS SSM"
             canonicalModels = container "Canonical Models (Pydantic)" "MatchEntry + PlayerRecord; src/canonical/models.py — outside Lambda src so the runtime stays pydantic-free (ADR 0006)" "Python 3.12+, Pydantic v2"
             schemas = container "Published JSON Schemas" "matches.schema.json + players.schema.json with URN $id, drift-tested in CI" "schemas/, generated from canonical models"
+
+            snsTopic = container "Alarm Topic (SNS)" "Delivers alarm notifications to operator email" "AWS SNS"
+            cwDashboard = container "CloudWatch Dashboard" "Per-Lambda invocations, errors, duration (p99), throttles; API Gateway request count, 4xx, 5xx, latency" "AWS CloudWatch"
         }
 
         skillcorner = softwareSystem "SkillCorner Open Data" "MIT-licensed A-League tracking data" "External"
@@ -72,6 +76,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         apiGateway -> lambdaArtifact "GET /v1/{provider}/matches/{id}/{artifact}" "Lambda proxy"
         apiGateway -> lambdaPlayers "GET /v1/{provider}/players" "Lambda proxy"
         apiGateway -> lambdaPlayer "GET /v1/{provider}/players/{id}" "Lambda proxy"
+        apiGateway -> lambdaHealth "GET /v1/health" "Lambda proxy"
 
         lambdaProviders -> dataBucket "Reads providers.json" "S3 GetObject"
         lambdaMatches -> dataBucket "Reads {provider}/matches.json; filters by tier + query params" "S3 GetObject"
@@ -103,12 +108,13 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
                 deploymentNode "API Gateway" "HTTP API with CORS, throttling (10 rps / 50 burst)" "AWS API Gateway v2" {
                     containerInstance apiGateway
                 }
-                deploymentNode "Lambda" "Serverless compute (unreserved concurrency on this account; X-Ray tracing; LAST_ROTATION env var for cache invalidation)" "AWS Lambda, Python 3.12" {
+                deploymentNode "Lambda" "Serverless compute (unreserved concurrency; X-Ray tracing; LAST_ROTATION env var for cache invalidation; security headers + structured JSON logging)" "AWS Lambda, Python 3.12" {
                     containerInstance lambdaProviders
                     containerInstance lambdaMatches
                     containerInstance lambdaArtifact
                     containerInstance lambdaPlayers
                     containerInstance lambdaPlayer
+                    containerInstance lambdaHealth
                 }
                 deploymentNode "S3" "Object storage with KMS-CMK encryption and versioning" "AWS S3" {
                     containerInstance dataBucket
@@ -122,6 +128,10 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
                 }
                 deploymentNode "SSM" "Parameter Store SecureString for owner token" "AWS SSM Parameter Store" {
                     containerInstance ssmParam
+                }
+                deploymentNode "Observability" "CloudWatch alarms, SNS notifications, dashboard (ADR 0007)" "AWS CloudWatch + SNS" {
+                    containerInstance snsTopic
+                    containerInstance cwDashboard
                 }
             }
             deploymentNode "HuggingFace" "Dataset hosting platform" "SaaS" {

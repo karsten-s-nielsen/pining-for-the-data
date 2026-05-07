@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Ensure shared.py (Pydantic models) is importable.
+# Ensure Lambda shared module is importable (tests use the same mocked S3 path).
 LAMBDA_SRC = Path(__file__).parent.parent.parent / "terraform" / "modules" / "functions" / "src"
 sys.path.insert(0, str(LAMBDA_SRC))
 
@@ -160,21 +160,21 @@ class TestUploadGame:
 
 class TestUploadValidation:
     def test_rejects_underscore_prefixed_provider(self):
-        from mock_api.upload import _validate_param
+        from mock_api._cli_common import validate_param
 
         with pytest.raises(ValueError, match="Invalid provider"):
-            _validate_param("_private", "provider")
+            validate_param("_private", "provider")
 
     def test_rejects_underscore_prefixed_game_id(self):
-        from mock_api.upload import _validate_param
+        from mock_api._cli_common import validate_param
 
         with pytest.raises(ValueError, match="Invalid game_id"):
-            _validate_param("_files", "game_id")
+            validate_param("_files", "game_id")
 
     def test_accepts_underscore_midstring(self):
-        from mock_api.upload import _validate_param
+        from mock_api._cli_common import validate_param
 
-        _validate_param("game_03", "game_id")  # no raise
+        validate_param("game_03", "game_id")  # no raise
 
 
 class TestUploadVisibility:

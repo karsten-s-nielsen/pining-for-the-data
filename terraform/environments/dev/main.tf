@@ -61,6 +61,8 @@ module "api" {
   list_players_function_name   = module.functions.list_players_function_name
   get_player_invoke_arn        = module.functions.get_player_invoke_arn
   get_player_function_name     = module.functions.get_player_function_name
+  health_invoke_arn            = module.functions.health_invoke_arn
+  health_function_name         = module.functions.health_function_name
 }
 
 module "audit" {
@@ -68,4 +70,19 @@ module "audit" {
   project_name            = var.project_name
   data_bucket_arn         = module.storage.bucket_arn
   data_bucket_kms_key_arn = module.storage.kms_key_arn
+}
+
+module "observability" {
+  source         = "../../modules/observability"
+  project_name   = var.project_name
+  alarm_email    = var.alarm_email
+  api_gateway_id = module.api.api_id
+  lambda_function_names = [
+    module.functions.list_providers_function_name,
+    module.functions.list_matches_function_name,
+    module.functions.get_artifact_function_name,
+    module.functions.list_players_function_name,
+    module.functions.get_player_function_name,
+    module.functions.health_function_name,
+  ]
 }

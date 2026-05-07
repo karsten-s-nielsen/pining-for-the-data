@@ -70,7 +70,7 @@ Tracking data from [SkillCorner open data](https://github.com/SkillCorner/openda
 
 Companion dataset to luxury-lakehouse, a serverless soccer analytics platform.
 
-Code and tooling: [pining-for-the-data](https://github.com/karstenskyt/pining-for-the-data)
+Code and tooling: [pining-for-the-data](https://github.com/karsten-s-nielsen/pining-for-the-data)
 """
 
 

@@ -1,6 +1,6 @@
 """Schema-drift tests: committed JSON Schema files must match the current Pydantic models.
 
-Spec §6.6: Pydantic models in shared.py are the single source of truth.
+Spec §6.6: Pydantic models in src/canonical/models.py are the single source of truth.
 schemas/{matches,players}.schema.json are generated from them via
 scripts/regenerate_schemas.py and committed for consumer reference. Editing
 a model without regenerating the schema fails this test.

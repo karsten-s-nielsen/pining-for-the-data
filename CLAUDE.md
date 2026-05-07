@@ -16,8 +16,9 @@ Companion repo to luxury-lakehouse.
 - `name_pools/` — JSON name lists (fictional first/last names, cities)
 - `rosters/` — generated de-identified roster JSONs per game
 - `terraform/` — AWS infrastructure (S3 + API Gateway + Lambda + SSM + KMS + CloudTrail)
-- `terraform/modules/functions/src/` — Lambda handlers + shared Pydantic models (canonical schema source of truth)
+- `terraform/modules/functions/src/` — Lambda handlers + shared utilities (auth, response builders, query filters)
 - `terraform/modules/audit/` — Audit module (CloudTrail data events on data bucket)
+- `terraform/modules/observability/` — CloudWatch alarms, SNS topic, dashboard (ADR 0007)
 - `docs/decisions/` — Architecture Decision Records
 - `docs/superpowers/{specs,plans}/` — Brainstormed specs and implementation plans
 
@@ -59,6 +60,6 @@ The mock API serves two visibility tiers:
 
 `validate_token` (in `terraform/modules/functions/src/shared.py`) returns a `Tier` enum (`PUBLIC` or `OWNER`); handlers filter responses by tier. Tier mismatch returns uniform `404` (not `403`) to avoid existence leaks. Duplicate-token misconfiguration classifies as `PUBLIC` (fail closed).
 
-Rotation: bump `LAST_ROTATION` env var on all 5 Lambdas via `terraform apply -var=last_rotation=$(date -u +%Y%m%dT%H%M%SZ)` after `aws ssm put-parameter --overwrite`. No dual-validity in v1; consumers must implement 401 retry during the rotation window.
+Rotation: bump `LAST_ROTATION` env var on all 6 Lambdas via `terraform apply -var=last_rotation=$(date -u +%Y%m%dT%H%M%SZ)` after `aws ssm put-parameter --overwrite`. No dual-validity in v1; consumers must implement 401 retry during the rotation window.
 
 Full design: `docs/superpowers/specs/2026-05-02-private-data-tier.md`. Architectural decisions: `docs/decisions/`.

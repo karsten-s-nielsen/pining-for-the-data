@@ -66,7 +66,7 @@ def handler(event: dict, context: object) -> dict:
         # Uniform 404 with not-found — no existence leak.
         return json_response(404, {"error": "Match not found"})
 
-    # Spec §4.3: artifacts is an object {name: filename}; keys form the whitelist,
+    # Spec §4.3: artifacts is an object {name: filename}; keys form the allowlist,
     # values resolve the file. The pre-Task-8 array form was migrated out of
     # production by scripts/backfill_skillcorner_artifacts.py — entries without
     # a dict here are treated as malformed (404).

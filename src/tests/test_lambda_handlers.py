@@ -39,10 +39,6 @@ def _reset_module_state(monkeypatch):
     shared._s3_client = None
 
 
-class _ResetS3:
-    """Mixin (kept for backward compat with subclasses; the autouse fixture handles reset)."""
-
-
 # ----- Tier enum + SSM fetcher -----
 
 
@@ -717,7 +713,7 @@ class TestGetArtifact:
         result = handler(event, None)
         assert result["statusCode"] == 404
 
-    def test_artifact_not_in_whitelist_returns_404(self) -> None:
+    def test_artifact_not_in_allowlist_returns_404(self) -> None:
         from get_artifact import handler
 
         mock_s3 = _mock_s3()
@@ -1169,3 +1165,83 @@ class TestPydanticModels:
         )
         dumped = p.model_dump()
         assert dumped["providerSpecificField"] == 42
+
+
+# ----- Response helpers (security headers, cache-control) -----
+
+
+class TestResponseHelpers:
+    def test_json_response_includes_security_headers(self):
+        resp = shared.json_response(200, {"ok": True})
+        assert resp["headers"]["X-Content-Type-Options"] == "nosniff"
+        assert resp["headers"]["Strict-Transport-Security"] == "max-age=63072000; includeSubDomains"
+        assert resp["headers"]["X-Frame-Options"] == "DENY"
+
+    def test_json_response_cache_control_default(self):
+        resp = shared.json_response(200, {"ok": True})
+        assert resp["headers"]["Cache-Control"] == "no-store"
+
+    def test_json_response_cache_control_override(self):
+        resp = shared.json_response(200, {"ok": True}, cache_control="public, max-age=60")
+        assert resp["headers"]["Cache-Control"] == "public, max-age=60"
+
+    def test_redirect_response_includes_security_headers(self):
+        resp = shared.redirect_response("https://example.com/file")
+        assert resp["statusCode"] == 302
+        assert resp["headers"]["Location"] == "https://example.com/file"
+        assert resp["headers"]["X-Content-Type-Options"] == "nosniff"
+        assert resp["headers"]["Cache-Control"] == "no-store"
+
+
+# ----- Shared helpers (provider_known, read_player_index) -----
+
+
+class TestSharedHelpers:
+    def test_provider_known_returns_true_for_known_provider(self):
+        s3 = MagicMock()
+        s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=b'{"providers":["sc","pff"]}'))}
+        assert shared.provider_known(s3, "bucket", "sc") is True
+
+    def test_provider_known_returns_false_for_unknown(self):
+        s3 = MagicMock()
+        s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=b'{"providers":["sc"]}'))}
+        assert shared.provider_known(s3, "bucket", "pff") is False
+
+    def test_provider_known_returns_false_on_missing_file(self):
+        s3 = MagicMock()
+        s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        s3.get_object.side_effect = s3.exceptions.NoSuchKey()
+        assert shared.provider_known(s3, "bucket", "sc") is False
+
+    def test_read_player_index_returns_players(self):
+        s3 = MagicMock()
+        payload = json.dumps({"provider": "sc", "players": [{"id": "p1"}, {"id": "p2"}]}).encode()
+        s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=payload))}
+        result = shared.read_player_index(s3, "bucket", "sc/players.json")
+        assert len(result) == 2
+        assert result[0]["id"] == "p1"
+
+    def test_read_player_index_returns_empty_on_missing(self):
+        s3 = MagicMock()
+        s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        s3.get_object.side_effect = s3.exceptions.NoSuchKey()
+        assert shared.read_player_index(s3, "bucket", "sc/players.json") == []
+
+
+# ----- Health endpoint -----
+
+
+class TestHealthEndpoint:
+    def test_health_returns_ok(self):
+        from health import handler
+
+        resp = handler({}, None)
+        assert resp["statusCode"] == 200
+        body = json.loads(resp["body"])
+        assert body["status"] == "ok"
+
+    def test_health_includes_security_headers(self):
+        from health import handler
+
+        resp = handler({}, None)
+        assert resp["headers"]["X-Content-Type-Options"] == "nosniff"

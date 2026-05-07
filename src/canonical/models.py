@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # rather than imported from shared.py because the canonical models must not
 # depend on the Lambda runtime module.
 _PATH_PARAM_RE = r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+_PATH_PARAM_COMPILED = re.compile(_PATH_PARAM_RE)
 
 
 class _SourceMeta(BaseModel):
@@ -53,7 +54,7 @@ class MatchEntry(BaseModel):
         ...,
         description=(
             "Map of artifact-name to exact filename. "
-            "Keys form the API whitelist; each key MUST match the path-param regex."
+            "Keys form the API allowlist; each key MUST match the path-param regex."
         ),
     )
     visibility: str = Field(..., pattern=r"^(public|private)$")
@@ -69,9 +70,8 @@ class MatchEntry(BaseModel):
         # Every artifact name must satisfy the same regex as path params,
         # so the upload tool cannot land entries the API will refuse to serve.
         # Spec §5.2.
-        regex = re.compile(_PATH_PARAM_RE)
         for name in self.artifacts:
-            if not regex.match(name) or len(name) > 128:
+            if not _PATH_PARAM_COMPILED.match(name) or len(name) > 128:
                 raise ValueError(
                     f"artifact name {name!r} does not match the path-param regex {_PATH_PARAM_RE} (max 128 chars)"
                 )

@@ -45,5 +45,11 @@ jobs:
       - name: Run tests
         run: uv run pytest --cov=src --cov-report=term-missing
 
+      - name: Dependency audit
+        run: uv run pip-audit
+
       - name: Secret scanning
-        run: uvx detect-secrets scan --baseline .secrets.baseline
+        run: |
+          uvx detect-secrets==1.5.0 scan --baseline .secrets.baseline
+          git diff --exit-code -I '"generated_at"' .secrets.baseline || (echo "::error::New potential secrets detected. Update .secrets.baseline and audit." && exit 1)
+

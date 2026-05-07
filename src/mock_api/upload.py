@@ -9,33 +9,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
-from datetime import UTC, datetime
+import os
 from pathlib import Path
 
 import boto3
 
 from canonical.models import MatchEntry
-
-# Same rule as the API-side validator: no leading underscore (reserved namespace).
-_SAFE_PARAM = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
-
-
-def _validate_param(value: str, name: str) -> None:
-    """Raise ValueError if param is empty, too long, or contains unsafe characters.
-
-    Leading underscore is rejected — reserved for internal namespace markers (`_private`).
-    """
-    if not value or len(value) > 128 or not _SAFE_PARAM.match(value):
-        raise ValueError(
-            f"Invalid {name}: must be 1-128 characters, start with alphanumeric, "
-            f"and contain only alphanumeric, hyphens, or underscores"
-        )
-
-
-def _utc_now_iso() -> str:
-    """Current UTC time, ISO 8601 with trailing Z (no microseconds)."""
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+from mock_api._cli_common import handle_cli_errors, utc_now_iso, validate_param
 
 
 def upload_game(
@@ -93,8 +73,8 @@ def upload_game(
     if visibility not in ("public", "private"):
         raise ValueError(f"Invalid visibility: {visibility!r} (must be 'public' or 'private')")
 
-    _validate_param(provider, "provider")
-    _validate_param(game_id, "game_id")
+    validate_param(provider, "provider")
+    validate_param(game_id, "game_id")
 
     s3 = boto3.client("s3")
 
@@ -154,7 +134,7 @@ def _build_match_entry(
         "id": game_id,
         "artifacts": artifacts,
         "visibility": visibility,
-        "updated_at": _utc_now_iso(),
+        "updated_at": utc_now_iso(),
     }
     if date:
         payload["date"] = date
@@ -191,8 +171,8 @@ def _check_no_tier_mixing(s3, bucket: str, provider: str, game_id: str, new_visi
         raise ValueError(
             f"Cannot mix tiers for game_id {game_id!r}: existing entry is "
             f"{existing_visibility!r}, requested {new_visibility!r}. "
-            f"Re-tiering requires an explicit move (manual procedure documented in spec §11.4; "
-            f"not supported by tooling in v1)."
+            f"Re-tiering is not supported by the upload tool. To change a game's visibility tier, "
+            f"manually delete the existing entry from matches.json and re-upload with the desired visibility."
         )
 
 
@@ -256,7 +236,12 @@ def main() -> None:
     parser.add_argument("game_dir", type=Path, help="Directory containing game artifacts")
     parser.add_argument("--provider", required=True, help="Provider name (e.g., skillcorner)")
     parser.add_argument("--game-id", required=True, help="Game identifier (e.g., game_03)")
-    parser.add_argument("--bucket", required=True, help="S3 bucket name")
+    parser.add_argument(
+        "--bucket",
+        required=False,
+        default=os.environ.get("PINING_BUCKET"),
+        help="S3 bucket name (default: $PINING_BUCKET env var)",
+    )
     parser.add_argument(
         "--visibility",
         default="public",
@@ -285,11 +270,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if not args.bucket:
+        parser.error("--bucket is required (or set PINING_BUCKET environment variable)")
+
     if not args.game_dir.is_dir():
         parser.error(f"Not a directory: {args.game_dir}")
 
     print(f"Uploading {args.game_id} ({args.provider}, {args.visibility}) to s3://{args.bucket}/")
-    artifacts = upload_game(
+    artifacts = handle_cli_errors(
+        parser,
+        upload_game,
         game_dir=args.game_dir,
         provider=args.provider,
         game_id=args.game_id,

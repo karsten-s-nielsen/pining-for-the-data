@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 
 from shared import (
@@ -12,6 +11,8 @@ from shared import (
     json_response,
     logger,
     parse_query_filters,
+    provider_known,
+    read_player_index,
     validate_path_param,
     validate_token,
 )
@@ -47,11 +48,11 @@ def handler(event: dict, context: object) -> dict:
         return filters
 
     s3 = get_s3_client()
-    if not _provider_known(s3, provider):
+    if not provider_known(s3, BUCKET, provider):
         return json_response(404, {"error": "Provider not found"})
 
-    public_players = _read_index(s3, f"{provider}/players.json")
-    private_players = _read_index(s3, f"{provider}/_private/players.json") if tier == Tier.OWNER else []
+    public_players = read_player_index(s3, BUCKET, f"{provider}/players.json")
+    private_players = read_player_index(s3, BUCKET, f"{provider}/_private/players.json") if tier == Tier.OWNER else []
 
     # Private-wins precedence on cross-tier ID collision (spec §6.3.1).
     by_id: dict[str, dict] = {}
@@ -67,29 +68,3 @@ def handler(event: dict, context: object) -> dict:
     players = apply_filters(list(by_id.values()), filters)
 
     return json_response(200, {"provider": provider, "players": players})
-
-
-def _provider_known(s3, provider: str) -> bool:
-    """Check that `provider` appears in providers.json. Returns True if so."""
-    try:
-        obj = s3.get_object(Bucket=BUCKET, Key="providers.json")
-        data = json.loads(obj["Body"].read().decode("utf-8"))
-        return provider in (data.get("providers") or [])
-    except s3.exceptions.NoSuchKey:
-        return False
-    except Exception:
-        logger.exception("s3_error", extra={"handler": "list_players", "key": "providers.json"})
-        return False
-
-
-def _read_index(s3, key: str) -> list[dict]:
-    """Read a players index from S3. Returns [] if the index doesn't exist."""
-    try:
-        obj = s3.get_object(Bucket=BUCKET, Key=key)
-        data = json.loads(obj["Body"].read().decode("utf-8"))
-        return data.get("players", [])
-    except s3.exceptions.NoSuchKey:
-        return []
-    except Exception:
-        logger.exception("s3_error", extra={"handler": "list_players", "key": key})
-        return []

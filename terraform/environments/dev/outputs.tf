@@ -22,3 +22,13 @@ output "audit_bucket_name" {
   description = "Audit log bucket"
   value       = module.audit.audit_bucket_name
 }
+
+output "dashboard_url" {
+  description = "CloudWatch dashboard URL"
+  value       = module.observability.dashboard_url
+}
+
+output "alarm_topic_arn" {
+  description = "SNS topic ARN for CloudWatch alarm notifications"
+  value       = module.observability.alarm_topic_arn
+}

@@ -23,6 +23,33 @@ from botocore.config import Config
 
 logger = logging.getLogger(__name__)
 
+
+class _JsonFormatter(logging.Formatter):
+    """Emit log records as single-line JSON for CloudWatch Insights queries."""
+
+    _EXTRA_KEYS = frozenset({"handler", "param", "key", "stage", "request_id", "trace_id"})
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry: dict = {
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0] is not None:
+            entry["exception"] = self.formatException(record.exc_info)
+        for k in self._EXTRA_KEYS:
+            v = getattr(record, k, None)
+            if v is not None:
+                entry[k] = v
+        return json.dumps(entry, default=str)
+
+
+# Configure root logger with JSON formatter (Lambda pre-creates a handler)
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+if _root_logger.handlers:
+    _root_logger.handlers[0].setFormatter(_JsonFormatter())
+
 # Force SigV4 for presigned URLs (required for KMS-encrypted buckets)
 _s3_config = Config(signature_version="s3v4")
 _s3_client = None
@@ -121,25 +148,34 @@ def validate_path_param(value: str, name: str) -> dict | None:
     return None
 
 
-def json_response(status_code: int, body: dict) -> dict:
-    """Build API Gateway proxy response."""
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+    "X-Frame-Options": "DENY",
+}
+
+
+def json_response(status_code: int, body: dict, *, cache_control: str = "no-store") -> dict:
+    """Build API Gateway proxy response with security headers."""
     return {
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": cache_control,
+            **_SECURITY_HEADERS,
         },
         "body": json.dumps(body),
     }
 
 
 def redirect_response(url: str) -> dict:
-    """Build 302 redirect response."""
+    """Build 302 redirect response with security headers."""
     return {
         "statusCode": 302,
         "headers": {
             "Location": url,
-            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-store",
+            **_SECURITY_HEADERS,
         },
         "body": "",
     }
@@ -147,6 +183,44 @@ def redirect_response(url: str) -> dict:
 
 def _error_response(status_code: int, message: str) -> dict:
     return json_response(status_code, {"error": message})
+
+
+def extract_request_context(event: dict, context: object) -> dict:
+    """Extract correlation IDs from the API Gateway v2 event and Lambda context."""
+    rc = event.get("requestContext") or {}
+    http = rc.get("http") or {}
+    return {
+        "request_id": rc.get("requestId", ""),
+        "trace_id": (event.get("headers") or {}).get("x-amzn-trace-id", ""),
+        "method": http.get("method", ""),
+        "path": http.get("path", ""),
+    }
+
+
+def provider_known(s3, bucket: str, provider: str) -> bool:
+    """Check that ``provider`` appears in providers.json."""
+    try:
+        obj = s3.get_object(Bucket=bucket, Key="providers.json")
+        data = json.loads(obj["Body"].read().decode("utf-8"))
+        return provider in (data.get("providers") or [])
+    except s3.exceptions.NoSuchKey:
+        return False
+    except Exception:
+        logger.exception("s3_error", extra={"key": "providers.json"})
+        return False
+
+
+def read_player_index(s3, bucket: str, key: str) -> list[dict]:
+    """Read a players index from S3. Returns [] if the index doesn't exist."""
+    try:
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        data = json.loads(obj["Body"].read().decode("utf-8"))
+        return data.get("players", [])
+    except s3.exceptions.NoSuchKey:
+        return []
+    except Exception:
+        logger.exception("s3_error", extra={"key": key})
+        return []
 
 
 # ----- Query parameter filtering (spec: 2026-05-07-query-parameter-filtering §3) -----

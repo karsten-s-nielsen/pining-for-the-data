@@ -16,8 +16,9 @@ For full design rationale see `docs/superpowers/specs/2026-05-02-private-data-ti
 If you discover a security issue in this project's code or infrastructure:
 
 1. **Do not** open a public GitHub issue.
-2. Email the maintainer directly (see GitHub profile for contact information).
-3. Include a description of the vulnerability, steps to reproduce, and potential impact.
+2. **Preferred:** Use [GitHub's private vulnerability reporting](https://github.com/karsten-s-nielsen/pining-for-the-data/security/advisories/new) to submit a security advisory directly.
+3. **Alternative:** Email the maintainer directly (see GitHub profile for contact information).
+4. Include a description of the vulnerability, steps to reproduce, and potential impact.
 
 You should receive an acknowledgment within 72 hours. Fixes for confirmed vulnerabilities will be released as soon as practical.
 

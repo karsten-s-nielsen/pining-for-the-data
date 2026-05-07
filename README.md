@@ -61,10 +61,12 @@ REST API mimicking commercial tracking data providers. Bearer token auth, same e
 | GET | `/v1/{provider}/matches/{id}/{artifact}` | 302 redirect to presigned S3 URL |
 | GET | `/v1/{provider}/players` | JSON list of player reference records |
 | GET | `/v1/{provider}/players/{id}` | Single player reference record |
+| GET | `/v1/health` | Health check (unauthenticated) |
 
 **Two-tier auth.** Public-tier content (the redistributed SkillCorner data) is served against the documented public token. Private-tier content (operator-loaded restricted datasets) requires a separate owner-tier token stored in AWS SSM Parameter Store. Tier semantics are uniform 404 on mismatch (no existence leaks). See [`docs/api-reference.md`](docs/api-reference.md) for the full contract; the design rationale lives in [`docs/superpowers/specs/2026-05-02-private-data-tier.md`](docs/superpowers/specs/2026-05-02-private-data-tier.md).
 
 ```bash
+API_URL="https://your-api-gateway-id.execute-api.us-east-1.amazonaws.com"
 TOKEN="test-token-pining-for-the-data"
 curl -H "Authorization: Bearer $TOKEN" "$API_URL/v1/skillcorner/matches" | python -m json.tool
 ```
@@ -89,7 +91,7 @@ git clone https://github.com/karsten-s-nielsen/pining-for-the-data.git
 cd pining-for-the-data
 uv sync --extra dev
 
-# Run tests — all 155 should pass
+# Run tests — all 166 should pass
 uv run pytest
 ```
 
@@ -133,6 +135,17 @@ uv run pining-upload path/to/game_03/ \
 
 Requires AWS credentials and a deployed mock API instance. See [Setup Guide](terraform/docs/setup.md).
 
+### Upload Player Catalogue
+
+```bash
+uv run pining-upload-players players.json \
+  --provider skillcorner \
+  --bucket your-bucket-name \
+  --visibility public
+```
+
+See [`docs/api-reference.md`](docs/api-reference.md) for the full player record schema.
+
 ## De-identification (for future private data)
 
 SkillCorner open data ships as-is — no de-identification applied. The de-identification engine below exists for future use with private/commercial tracking data.
@@ -155,7 +168,7 @@ Remaining players get randomly generated names from fictional name pools. The to
 
 ## Architecture
 
-Open [`docs/c4/architecture.html`](docs/c4/architecture.html) in a browser to explore the C4 architecture diagrams (System Context, Container, Dynamic).
+Open [`docs/c4/architecture.html`](docs/c4/architecture.html) in a browser to explore the C4 architecture diagrams (System Context, Container, Component, Dynamic, Deployment).
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full written architecture documentation.
 
@@ -173,7 +186,7 @@ pining-for-the-data/
 │   ├── publish/             # HuggingFace Hub dataset publishing
 │   ├── mock_api/            # Upload CLIs (pining-upload, pining-upload-players)
 │   ├── canonical/           # Canonical Pydantic models (MatchEntry, PlayerRecord); kept out of Lambda src so the runtime stays pydantic-free (ADR 0006)
-│   └── tests/               # pytest test suite (155 tests)
+│   └── tests/               # pytest test suite (166 tests)
 ├── name_pools/              # JSON name lists (fictional first/last names, cities)
 ├── rosters/                 # Generated de-identified rosters per game
 ├── schemas/                 # Published JSON Schemas for matches.json + players.json
@@ -207,5 +220,5 @@ Redistributed SkillCorner data: [MIT](NOTICE)
 
 ## See Also
 
-- luxury-lakehouse &mdash; the main analytics platform that ingests this data
+- [luxury-lakehouse](https://github.com/karsten-s-nielsen/luxury-lakehouse) &mdash; the main analytics platform that ingests this data
 - [SkillCorner open data](https://github.com/SkillCorner/opendata) &mdash; source tracking data (MIT license)

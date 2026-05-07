@@ -47,3 +47,13 @@ output "get_player_function_name" {
   description = "Function name for the get_player Lambda"
   value       = aws_lambda_function.get_player.function_name
 }
+
+output "health_invoke_arn" {
+  description = "Invoke ARN for the health Lambda"
+  value       = aws_lambda_function.health.invoke_arn
+}
+
+output "health_function_name" {
+  description = "Function name for the health Lambda"
+  value       = aws_lambda_function.health.function_name
+}

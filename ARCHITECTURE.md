@@ -99,7 +99,7 @@ Read and validate provider-specific tracking data.
 
 ### 3.4 Mock API (`src/mock_api/`)
 
-Upload CLIs (`upload.py`, `upload_players.py`) for S3 data management. Lambda handlers live in `terraform/modules/functions/src/`. Canonical Pydantic models (`MatchEntry`, `PlayerRecord`) in `shared.py` are the single source of truth for the index shapes; JSON Schemas in `schemas/` are generated from them and drift-tested.
+Upload CLIs (`upload.py`, `upload_players.py`) for S3 data management. Lambda handlers live in `terraform/modules/functions/src/`. Canonical Pydantic models (`MatchEntry`, `PlayerRecord`) in `src/canonical/models.py` are the single source of truth for the index shapes; JSON Schemas in `schemas/` are generated from them and drift-tested.
 
 | Endpoint | Handler | Purpose |
 |----------|---------|---------|
@@ -119,7 +119,7 @@ Upload CLIs (`upload.py`, `upload_players.py`) for S3 data management. Lambda ha
 
 Tier mismatch returns uniform `404` (not `403`) to avoid existence leaks. Private-tier content lives under a reserved `_private/` S3 prefix (ADR 0002): `{bucket}/{provider}/_private/{game_id}/...` for matches, `{bucket}/{provider}/_private/players.json` for the players index. Path-param validators reject `_`-prefixed values, making `_private` an unreachable input from API callers.
 
-The owner-token cache (`functools.cache`-decorated) is invalidated during rotation by bumping a no-op `LAST_ROTATION` env var on all 5 Lambdas via `terraform apply -var=last_rotation=...` (spec §3.5). No dual-validity in v1: consumers must implement 401 retry during the rotation window.
+The owner-token cache (`functools.cache`-decorated) is invalidated during rotation by bumping a no-op `LAST_ROTATION` env var on all 6 Lambdas via `terraform apply -var=last_rotation=...` (spec §3.5). No dual-validity in v1: consumers must implement 401 retry during the rotation window.
 
 ---
 
@@ -135,8 +135,8 @@ AWS (effectively $0/month at expected volume)
 ├── SSM Parameter Store      →  /pining-for-the-data/api_token_owner (SecureString)
 ├── CloudTrail               →  Data events on data bucket; excludes only providers.json reads
 ├── API Gateway (HTTP API)   →  REST endpoints mimicking provider protocol; throttled (10rps/50burst)
-└── Lambda x5                →  list_providers, list_matches, get_artifact, list_players, get_player
-                                 (auth check via Tier enum + SSM owner-token fetch + S3 presigned URL gen)
+└── Lambda x6                →  list_providers, list_matches, get_artifact, list_players, get_player, health
+                                 (auth on 5 data handlers; health is unauthenticated for synthetic monitoring)
 ```
 
 Terraform modules in `terraform/`. Audit logging is provisioned via `terraform/modules/audit/`. See [setup guide](terraform/docs/setup.md) and [ADR 0001-0005](docs/decisions/) for design rationale.

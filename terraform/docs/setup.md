@@ -76,8 +76,11 @@ project_name = "pining-for-the-data"
 api_token    = "test-token-pining-for-the-data"
 ```
 
-The token is intentionally public and documented — the data is open.
+The public token is intentionally documented — the open data is freely available.
 Auth exists to exercise the same code path as real providers.
+
+The API also supports a **private (owner) tier** for operator-loaded restricted content.
+Owner-tier setup is covered in Step 6 below.
 
 ---
 
@@ -125,7 +128,47 @@ The upload CLI:
 
 ---
 
-## Step 6: Test the API
+## Step 5b: Upload Player Catalogue (Optional)
+
+Upload a player reference catalogue for a provider:
+
+```bash
+uv run pining-upload-players players.json \
+  --provider skillcorner \
+  --bucket "karstenskyt-pining-for-the-data" \
+  --visibility public
+```
+
+For private-tier player data, use `--visibility private` along with `--source-name`, `--source-url`, and `--source-licence` flags.
+
+---
+
+## Step 6: Set Up Owner-Tier Auth (Optional)
+
+The API supports two authentication tiers. The public token (Step 3) serves open data.
+An optional **owner token** grants access to private-tier content uploaded with `--visibility private`.
+
+Create the owner token in SSM Parameter Store:
+
+```bash
+aws ssm put-parameter \
+  --name "/pining-for-the-data/api_token_owner" \
+  --type SecureString \
+  --value "your-secret-owner-token" \
+  --overwrite
+```
+
+Then invalidate Lambda caches so the new token takes effect:
+
+```bash
+terraform apply -var=last_rotation=$(date -u +%Y%m%dT%H%M%SZ)
+```
+
+See [`docs/api-reference.md`](../../docs/api-reference.md) for the full two-tier auth contract.
+
+---
+
+## Step 7: Test the API
 
 ```bash
 TOKEN="test-token-pining-for-the-data"
@@ -155,7 +198,7 @@ Everything is configurable — no hardcoded values. To deploy your own instance:
 1. Fork this repo
 2. Create an AWS account ([Free Tier](https://aws.amazon.com/free/) covers everything)
 3. Install Terraform and AWS CLI
-4. Follow Steps 1-6 above, changing `project_name` in `terraform.tfvars` to your own
+4. Follow Steps 1-7 above, changing `project_name` in `terraform.tfvars` to your own
 
 What you'll customize:
 
@@ -199,7 +242,9 @@ terraform/
 │   ├── storage/          # Data bucket + KMS encryption
 │   ├── functions/        # Lambda handlers + IAM
 │   │   └── src/          # Python handler source
-│   └── api/              # API Gateway REST routes
+│   ├── api/              # API Gateway REST routes
+│   ├── audit/            # CloudTrail data events on data bucket
+│   └── observability/    # CloudWatch alarms, SNS topic, dashboard
 └── shared/               # Provider + version pins
 ```
 
@@ -210,8 +255,11 @@ terraform/
 | GET | `/v1/providers` | `list_providers` | JSON list of providers |
 | GET | `/v1/{provider}/matches` | `list_matches` | JSON list of games + artifacts |
 | GET | `/v1/{provider}/matches/{id}/{artifact}` | `get_artifact` | 302 redirect to presigned S3 URL |
+| GET | `/v1/{provider}/players` | `list_players` | JSON list of player reference records |
+| GET | `/v1/{provider}/players/{id}` | `get_player` | Single player reference record |
+| GET | `/v1/health` | `health` | Health check (unauthenticated) |
 
-All endpoints require `Authorization: Bearer <token>`.
+All endpoints except `/v1/health` require `Authorization: Bearer <token>`.
 
 ---
 
@@ -231,11 +279,15 @@ All endpoints require `Authorization: Bearer <token>`.
 
 ## Teardown
 
+> **Warning:** This permanently deletes all uploaded data, audit logs, and infrastructure.
+> There is no undo. Make sure you have backups of any data you want to keep.
+
 To remove all AWS resources:
 
 ```bash
-# Empty the data bucket first (Terraform can't delete non-empty buckets)
+# Empty both buckets first (Terraform can't delete non-empty buckets)
 aws s3 rm s3://karstenskyt-pining-for-the-data --recursive
+aws s3 rm s3://karstenskyt-pining-for-the-data-audit --recursive
 
 cd terraform/environments/dev
 terraform destroy

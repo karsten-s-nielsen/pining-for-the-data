@@ -52,3 +52,13 @@ variable "get_player_function_name" {
   description = "Function name for the get_player Lambda"
   type        = string
 }
+
+variable "health_invoke_arn" {
+  description = "Invoke ARN for the health Lambda"
+  type        = string
+}
+
+variable "health_function_name" {
+  description = "Function name for the health Lambda"
+  type        = string
+}

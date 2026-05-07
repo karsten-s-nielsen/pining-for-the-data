@@ -23,15 +23,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
-from datetime import UTC, datetime
+import os
 from pathlib import Path
 
 import boto3
 
 from canonical.models import PlayerRecord
-
-_SAFE_PARAM = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+from mock_api._cli_common import handle_cli_errors, utc_now_iso, validate_param
 
 _CSV_REJECTION_MESSAGE = (
     "pining-upload-players accepts canonical JSON only (a list of PlayerRecord objects, "
@@ -40,15 +38,6 @@ _CSV_REJECTION_MESSAGE = (
     "to canonical JSON by a provider-specific adapter. See scripts/upload_pff_wc2022.py for "
     "a worked example."
 )
-
-
-def _validate_param(value: str, name: str) -> None:
-    if not value or len(value) > 128 or not _SAFE_PARAM.match(value):
-        raise ValueError(f"Invalid {name}: must be 1-128 chars, alphanumeric start, then [a-zA-Z0-9_-]+")
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def upload_players(
@@ -63,7 +52,7 @@ def upload_players(
     """Upload a canonical-JSON player catalogue to S3. Returns the number of players in the resulting index."""
     if visibility not in ("public", "private"):
         raise ValueError(f"Invalid visibility: {visibility!r}")
-    _validate_param(provider, "provider")
+    validate_param(provider, "provider")
 
     if not input_file.is_file():
         raise FileNotFoundError(f"Not a file: {input_file}")
@@ -75,7 +64,7 @@ def upload_players(
     raw_records = _read_canonical_json(input_file)
 
     # Validate every record against the canonical Pydantic model BEFORE any S3 call.
-    now = _utc_now_iso()
+    now = utc_now_iso()
     new_records: list[dict] = []
     for raw in raw_records:
         record = dict(raw)  # avoid mutating caller's data
@@ -108,7 +97,9 @@ def upload_players(
         if new["id"] in other_ids:
             raise ValueError(
                 f"Cross-tier collision for player id {new['id']!r}: id already exists in the "
-                f"other tier ({other_key!r}). Re-tiering requires the manual procedure in spec §11.4."
+                f"other tier ({other_key!r}). Re-tiering is not supported by the upload tool. "
+                f"Manually delete the player from the existing tier's index and re-upload with "
+                f"the desired visibility."
             )
 
     # Same-file tier-mixing check (defensive — same-tier merge only here).
@@ -159,10 +150,15 @@ def main() -> None:
     )
     parser.add_argument("input_file", type=Path, help="Canonical JSON file with player records")
     parser.add_argument("--provider", required=True, help="Provider name (e.g., pff)")
-    parser.add_argument("--bucket", required=True, help="S3 bucket name")
+    parser.add_argument(
+        "--bucket",
+        required=False,
+        default=os.environ.get("PINING_BUCKET"),
+        help="S3 bucket name (default: $PINING_BUCKET env var)",
+    )
     parser.add_argument("--visibility", default="public", choices=["public", "private"])
-    parser.add_argument("--source-name", default=None)
-    parser.add_argument("--source-url", default=None)
+    parser.add_argument("--source-name", default=None, help="Name of the original data source")
+    parser.add_argument("--source-url", default=None, help="URL of the original data source")
     # British spelling canonical; American is a quiet alias (spec §8.2.1).
     parser.add_argument(
         "--source-licence",
@@ -173,8 +169,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if not args.bucket:
+        parser.error("--bucket is required (or set PINING_BUCKET environment variable)")
+
     print(f"Uploading players ({args.provider}, {args.visibility}) from {args.input_file}")
-    upload_players(
+    handle_cli_errors(
+        parser,
+        upload_players,
         input_file=args.input_file,
         provider=args.provider,
         bucket=args.bucket,

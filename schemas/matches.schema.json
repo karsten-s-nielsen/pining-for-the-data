@@ -40,7 +40,7 @@
       "additionalProperties": {
         "type": "string"
       },
-      "description": "Map of artifact-name to exact filename. Keys form the API whitelist; each key MUST match the path-param regex.",
+      "description": "Map of artifact-name to exact filename. Keys form the API allowlist; each key MUST match the path-param regex.",
       "title": "Artifacts",
       "type": "object"
     },

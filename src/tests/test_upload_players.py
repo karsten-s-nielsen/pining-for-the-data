@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Ensure shared.py (Pydantic models) is importable.
+# Ensure Lambda shared module is importable (tests use the same mocked S3 path).
 LAMBDA_SRC = Path(__file__).parent.parent.parent / "terraform" / "modules" / "functions" / "src"
 sys.path.insert(0, str(LAMBDA_SRC))
 

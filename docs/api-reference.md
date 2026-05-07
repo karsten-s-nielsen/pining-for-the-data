@@ -25,7 +25,7 @@ The API recognises **two tiers** of bearer token:
 
 **Tier semantics — uniform 404 on mismatch.** Private-tier content accessed with the public token returns `404`, identical to "this resource doesn't exist". This prevents enumeration of private content via behaviour fingerprinting. The owner-token holder never hits this path.
 
-**Rotation.** Update the SSM value via `aws ssm put-parameter --overwrite`, then bump `LAST_ROTATION` env var on all 5 Lambdas via `terraform apply -var=last_rotation=$(date -u +%Y%m%dT%H%M%SZ)`. No dual-validity in v1: consumers MUST implement 401 retry with backoff during the rotation window. See `docs/superpowers/specs/2026-05-02-private-data-tier.md` §3.5.
+**Rotation.** Update the SSM value via `aws ssm put-parameter --overwrite`, then bump `LAST_ROTATION` env var on all 6 Lambdas via `terraform apply -var=last_rotation=$(date -u +%Y%m%dT%H%M%SZ)`. No dual-validity in v1: consumers MUST implement 401 retry with backoff during the rotation window. See `docs/superpowers/specs/2026-05-02-private-data-tier.md` §3.5.
 
 ---
 
@@ -110,7 +110,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 }
 ```
 
-`artifacts` is an object mapping artifact name → exact filename. The keys form the API's whitelist: `get_artifact` rejects any name not present here. `visibility` is `"public"` or `"private"` (missing = `"public"` for backwards compatibility). `updated_at` is set by the upload tooling on every write, including no-op re-uploads — consumers can poll it for incremental refresh.
+`artifacts` is an object mapping artifact name → exact filename. The keys form the API's allowlist: `get_artifact` rejects any name not present here. `visibility` is `"public"` or `"private"` (missing = `"public"` for backwards compatibility). `updated_at` is set by the upload tooling on every write, including no-op re-uploads — consumers can poll it for incremental refresh.
 
 **Tier behaviour**
 
@@ -159,7 +159,7 @@ The `Location` header contains a presigned S3 URL (valid for 1 hour by default).
 | `401` | `{"error": "Missing or malformed Authorization header"}` | No bearer header present |
 | `401` | `{"error": "Invalid token"}` | Token does not match either configured value |
 | `404` | `{"error": "Match not found"}` | Match doesn't exist OR is private and the caller is PUBLIC tier |
-| `404` | `{"error": "Artifact not found"}` | The artifact name is not a key in the entry's `artifacts` whitelist |
+| `404` | `{"error": "Artifact not found"}` | The artifact name is not a key in the entry's `artifacts` allowlist |
 
 ---
 
@@ -258,13 +258,29 @@ Returns a single player reference record. Same provider-gating + private-precede
 
 ---
 
+### Health Check
+
+```
+GET /v1/health
+```
+
+Unauthenticated health check for synthetic monitoring and uptime probes. Returns `200 OK` with `{"status": "ok"}` when the Lambda is responsive. No bearer token required.
+
+**Response** `200 OK`
+
+```json
+{"status": "ok"}
+```
+
+---
+
 ## S3 Data Layout
 
 ```
 {bucket}/
 ├── providers.json                       # ["skillcorner", "pff"]
 ├── skillcorner/                         # public-tier provider
-│   ├── matches.json                     # discovery index (object-form artifacts; see above)
+│   ├── matches.json                     # discovery index (object-form artifacts dict)
 │   ├── players.json                     # (optional) public-tier player catalogue
 │   ├── game_03/
 │   │   ├── match.json

@@ -21,3 +21,9 @@ variable "last_rotation" {
   type        = string
   default     = "initial"
 }
+
+variable "alarm_email" {
+  description = "Email for CloudWatch alarm notifications (leave empty to skip)"
+  type        = string
+  default     = ""
+}

@@ -121,6 +121,8 @@ curl -s -L -H "Authorization: Bearer $TOKEN" \
 
 See the [Setup Guide](../terraform/docs/setup.md) to deploy your own API instance.
 
+> **Windows:** Replace `curl` with `Invoke-WebRequest` or use `curl.exe` (shipped with Windows 10+). Replace `python -m json.tool` with `ConvertFrom-Json` in PowerShell.
+
 ---
 
 ## Next Steps

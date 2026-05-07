@@ -1,6 +1,6 @@
 """Regenerate schemas/{matches,players}.schema.json from Pydantic models.
 
-Run after any edit to MatchEntry or PlayerRecord in shared.py. The schema-drift
+Run after any edit to MatchEntry or PlayerRecord in src/canonical/models.py. The schema-drift
 test (src/tests/test_schemas.py) fails CI if you forget.
 """
 

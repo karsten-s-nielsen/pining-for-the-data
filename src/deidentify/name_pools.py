@@ -72,12 +72,14 @@ class NamePools:
     ) -> list[str]:
         """Generate ``count`` unique player names, avoiding collisions with ``exclude``."""
         exclude = exclude or set()
+        seen: set[str] = set(exclude)
         names: list[str] = []
         attempts = 0
         max_attempts = count * 20
         while len(names) < count and attempts < max_attempts:
             name = self.sample_player_name(gender)
-            if name not in exclude and name not in names:
+            if name not in seen:
+                seen.add(name)
                 names.append(name)
             attempts += 1
         if len(names) < count:

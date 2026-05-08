@@ -53,6 +53,17 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform validate
 
+      # One-time bootstrap: import the OIDC role created manually in the
+      # AWS Console.  After the first successful apply this is a no-op.
+      # TODO: remove this step after the first successful apply.
+      - name: Import OIDC role (bootstrap)
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform import \
+            module.github_oidc.aws_iam_role.github_actions \
+            pining-for-the-data-github-actions-dev \
+            2>&1 || true
+
       - name: Terraform Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform plan -no-color -out=tfplan

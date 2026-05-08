@@ -32,3 +32,8 @@ output "alarm_topic_arn" {
   description = "SNS topic ARN for CloudWatch alarm notifications"
   value       = module.observability.alarm_topic_arn
 }
+
+output "github_actions_role_arn" {
+  description = "IAM role ARN for GitHub Actions OIDC — set as AWS_OIDC_ROLE_ARN repo variable"
+  value       = module.github_oidc.role_arn
+}

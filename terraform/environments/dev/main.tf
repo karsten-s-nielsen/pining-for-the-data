@@ -72,6 +72,24 @@ module "audit" {
   data_bucket_kms_key_arn = module.storage.kms_key_arn
 }
 
+# ── Module: GitHub OIDC ──────────────────────────────────────────────────────
+# IAM role for secretless GitHub Actions CI.  References the existing OIDC
+# identity provider (created by luxury-lakehouse) — one per AWS account.
+# KMS key alias resolves the shared state bucket's encryption key.
+
+data "aws_kms_alias" "state_bucket_key" {
+  name = "alias/luxury-lakehouse-terraform-state-dev"
+}
+
+module "github_oidc" {
+  source = "../../modules/github_oidc"
+
+  project_name      = var.project_name
+  github_repository = "karsten-s-nielsen/pining-for-the-data"
+  state_bucket      = "karstenskyt-terraform-state"
+  state_kms_key_arn = data.aws_kms_alias.state_bucket_key.target_key_arn
+}
+
 module "observability" {
   source         = "../../modules/observability"
   project_name   = var.project_name

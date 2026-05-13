@@ -12,7 +12,7 @@ Companion repo to luxury-lakehouse.
 - `src/tests/` — pytest test suite
 - `schemas/` — Published JSON Schemas for `matches.json` and `players.json` (generated from Pydantic models in `src/canonical/models.py`; drift-tested in CI; models kept out of the Lambda zip so the runtime stays pydantic-free)
 - `src/canonical/` — Canonical Pydantic models (`MatchEntry`, `PlayerRecord`); imported by upload CLIs + schema regenerator + tests
-- `scripts/` — One-shot ops scripts (regenerate_schemas.py, upload_pff_wc2022.py, verify_pff_load.py)
+- `scripts/` — One-shot ops scripts (regenerate_schemas.py, upload_gradient_wc2022.py, verify_gradient_load.py)
 - `name_pools/` — JSON name lists (fictional first/last names, cities)
 - `rosters/` — generated de-identified roster JSONs per game
 - `terraform/` — AWS infrastructure (S3 + API Gateway + Lambda + SSM + KMS + CloudTrail)
@@ -56,7 +56,7 @@ The de-identification engine is retained for future use with private/commercial 
 The mock API serves two visibility tiers:
 
 - **Public tier**: documented `api_token` in `terraform.tfvars`. Serves redistributed open data (e.g., SkillCorner).
-- **Owner tier**: bearer token stored in SSM Parameter Store SecureString (`/pining-for-the-data/api_token_owner`). Serves restricted private-tier content (e.g., PFF). Set out-of-band via `aws ssm put-parameter`; never committed.
+- **Owner tier**: bearer token stored in SSM Parameter Store SecureString (`/pining-for-the-data/api_token_owner`). Serves restricted private-tier content (e.g., Gradient Sports). Set out-of-band via `aws ssm put-parameter`; never committed.
 
 `validate_token` (in `terraform/modules/functions/src/shared.py`) returns a `Tier` enum (`PUBLIC` or `OWNER`); handlers filter responses by tier. Tier mismatch returns uniform `404` (not `403`) to avoid existence leaks. Duplicate-token misconfiguration classifies as `PUBLIC` (fail closed).
 

@@ -1,4 +1,4 @@
-"""Upload PFF FIFA World Cup 2022 to the mock provider API as private-tier data.
+"""Upload Gradient Sports FIFA World Cup 2022 to the mock provider API as private-tier data.
 
 Reshapes the source bundle into per-match staging directories, then calls
 the pining-upload primitives. For players, normalises players.csv into a
@@ -23,7 +23,7 @@ Source layout (input):
     ├── Tracking Data/{id}.jsonl.bz2
     ├── competitions.csv          # not uploaded — directory data covered by /matches
     ├── players.csv               # normalised to canonical JSON, then uploaded as /players catalogue
-    └── PFF FC Change Log.docx    # not uploaded
+    └── Gradient Sports Change Log.docx    # not uploaded
 """
 
 from __future__ import annotations
@@ -43,14 +43,14 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 from mock_api.upload import upload_game  # noqa: E402
 from mock_api.upload_players import upload_players  # noqa: E402
 
-PROVIDER = "pff"
-SOURCE_NAME = "PFF FC"
-SOURCE_URL = "https://www.pff.com/"
+PROVIDER = "gradient-sports"
+SOURCE_NAME = "Gradient Sports"
+SOURCE_URL = "https://www.gradientsports.com/"
 SOURCE_LICENCE = "Restricted; redistribution not permitted pending licence clarification"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Bulk-upload PFF World Cup 2022 to the mock provider API")
+    parser = argparse.ArgumentParser(description="Bulk-upload Gradient Sports World Cup 2022 to the mock provider API")
     parser.add_argument("source_dir", type=Path, help="Path to the 'FIFA World Cup 2022' source folder")
     parser.add_argument("--bucket", required=True, help="S3 bucket name")
     parser.add_argument("--limit", type=int, default=None, help="Limit number of matches uploaded (smoke test)")
@@ -74,10 +74,10 @@ def main() -> None:
         if not players_csv.is_file():
             print(f"WARN: {players_csv} not found, skipping player catalogue upload")
         else:
-            with tempfile.TemporaryDirectory(prefix="pff-players-") as tmp:
+            with tempfile.TemporaryDirectory(prefix="gradient-players-") as tmp:
                 canonical_json = Path(tmp) / "players.json"
                 count = _normalise_players_csv_to_canonical(players_csv, canonical_json)
-                print(f"Normalised {count} PFF player(s) to canonical JSON at {canonical_json}")
+                print(f"Normalised {count} Gradient Sports player(s) to canonical JSON at {canonical_json}")
                 print(f"Uploading player catalogue to s3://{args.bucket}/{PROVIDER}/_private/players.json")
                 upload_players(
                     input_file=canonical_json,
@@ -93,9 +93,9 @@ def main() -> None:
 
 
 def _normalise_players_csv_to_canonical(csv_path: Path, out_path: Path) -> int:
-    """Read PFF's players.csv and write a canonical-JSON file matching PlayerRecord.
+    """Read Gradient Sports players.csv and write a canonical-JSON file matching PlayerRecord.
 
-    PFF columns: dob, firstName, height, id, lastName, nickname, positionGroupType.
+    Gradient Sports columns: dob, firstName, height, id, lastName, nickname, positionGroupType.
     Maps directly to canonical fields with no semantic translation; type-coerce
     `height` to float. visibility/updated_at/source are added by the upload CLI.
     """
@@ -141,14 +141,14 @@ def _upload_one_match(source_dir: Path, match_id: str, bucket: str) -> None:
 
     metadata_obj = json.loads(metadata_path.read_text(encoding="utf-8"))
     if isinstance(metadata_obj, list):
-        # PFF wraps the metadata in a single-element list
+        # Gradient Sports wraps the metadata in a single-element list
         metadata_obj = metadata_obj[0] if metadata_obj else {}
 
     date = metadata_obj.get("date", "").split("T", 1)[0]
     home = (metadata_obj.get("homeTeam") or {}).get("name", "")
     away = (metadata_obj.get("awayTeam") or {}).get("name", "")
 
-    with tempfile.TemporaryDirectory(prefix=f"pff-{match_id}-") as tmp:
+    with tempfile.TemporaryDirectory(prefix=f"gradient-{match_id}-") as tmp:
         staging = Path(tmp)
         shutil.copy(metadata_path, staging / "metadata.json")
         shutil.copy(events_path, staging / "events.json")

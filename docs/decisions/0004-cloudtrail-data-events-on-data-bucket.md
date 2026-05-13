@@ -6,7 +6,7 @@
 
 ## Context
 
-The mock provider API now serves restricted-tier content. The operator needs an audit trail of who downloaded what, when — both as a defensive control (detect anomalous enumeration patterns) and as a record for licensing/compliance conversations with upstream data providers (PFF FC, future Soccermatics Pro).
+The mock provider API now serves restricted-tier content. The operator needs an audit trail of who downloaded what, when — both as a defensive control (detect anomalous enumeration patterns) and as a record for licensing/compliance conversations with upstream data providers (Gradient Sports, future Soccermatics Pro).
 
 ## Decision
 
@@ -31,7 +31,7 @@ The trail's advanced event selector excludes only `/providers.json` reads (true 
 ## Alternatives Considered
 
 - **S3 Server Access Logging instead of CloudTrail**: rejected — server access logs are best-effort delivery, log-line-formatted (harder to query than CloudTrail's structured JSON), and don't capture IAM principal cleanly.
-- **No audit logging in v1; add later if needed**: rejected — the licence ambiguity around the initial PFF load (later resolved) made a defensible access trail valuable from day one. Cost is low enough that "add later" trades against "don't have history when you need it".
+- **No audit logging in v1; add later if needed**: rejected — the licence ambiguity around the initial Gradient Sports load (later resolved) made a defensible access trail valuable from day one. Cost is low enough that "add later" trades against "don't have history when you need it".
 - **VPC Flow Logs**: out of scope — the data bucket is accessed over public S3 endpoints with presigned URLs, not from inside a VPC.
 
 ## See Also

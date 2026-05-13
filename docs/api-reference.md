@@ -43,7 +43,7 @@ Returns all registered tracking data providers. **Tier-blind** — returns the s
 
 ```json
 {
-  "providers": ["skillcorner", "pff"]
+  "providers": ["skillcorner", "gradient-sports"]
 }
 ```
 
@@ -191,7 +191,7 @@ Returns the player reference catalogue for a provider, **filtered by tier**. Pro
 
 ```json
 {
-  "provider": "pff",
+  "provider": "gradient-sports",
   "players": [
     {
       "id": "example-007",
@@ -204,8 +204,8 @@ Returns the player reference catalogue for a provider, **filtered by tier**. Pro
       "visibility": "private",
       "updated_at": "2026-05-03T16:42:00Z",
       "source": {
-        "name": "PFF FC",
-        "url": "https://www.pff.com/",
+        "name": "Gradient Sports",
+        "url": "https://www.gradientsports.com/",
         "licence": "Restricted; redistribution not permitted pending licence clarification"
       }
     }
@@ -278,19 +278,19 @@ Unauthenticated health check for synthetic monitoring and uptime probes. Returns
 
 ```
 {bucket}/
-├── providers.json                       # ["skillcorner", "pff"]
-├── skillcorner/                         # public-tier provider
-│   ├── matches.json                     # discovery index (object-form artifacts dict)
-│   ├── players.json                     # (optional) public-tier player catalogue
+├── providers.json              # ["skillcorner", "gradient-sports"]
+├── skillcorner/                # public-tier provider
+│   ├── matches.json            # discovery index (object-form artifacts dict)
+│   ├── players.json            # (optional) public-tier player catalogue
 │   ├── game_03/
 │   │   ├── match.json
 │   │   └── tracking.jsonl
 │   └── game_04/
 │       └── ...
-└── pff/                                 # restricted-tier provider
-    ├── matches.json                     # all entries marked visibility:"private"
-    └── _private/                        # reserved segment — owner-tier only
-        ├── players.json                 # private-tier player catalogue
+└── gradient-sports/            # restricted-tier provider
+    ├── matches.json            # all entries marked visibility:"private"
+    └── _private/               # reserved segment — owner-tier only
+        ├── players.json        # private-tier player catalogue
         └── example-001/
             ├── metadata.json
             ├── events.json
@@ -331,7 +331,7 @@ uv run pining-upload path/to/game/ \
   --visibility public           # or --visibility private
 ```
 
-**Player catalogue upload** (canonical JSON only — provider-specific shapes must be normalised first; see `scripts/upload_pff_wc2022.py` for a worked example):
+**Player catalogue upload** (canonical JSON only — provider-specific shapes must be normalised first; see `scripts/upload_gradient_wc2022.py` for a worked example):
 
 ```bash
 uv run pining-upload-players players.json \

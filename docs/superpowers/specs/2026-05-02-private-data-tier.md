@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-02
 **Status:** Proposed
-**Scope:** Two-tier auth model for the mock provider API (public + owner), enabling private data sources (PFF, Soccermatics Pro) to coexist with the existing redistributed open data on the same infrastructure. Adds provider-level reference resource endpoints (starting with `/players`) and CloudTrail audit logging.
+**Scope:** Two-tier auth model for the mock provider API (public + owner), enabling private data sources (Gradient Sports, Soccermatics Pro) to coexist with the existing redistributed open data on the same infrastructure. Adds provider-level reference resource endpoints (starting with `/players`) and CloudTrail audit logging.
 
 ---
 
@@ -10,7 +10,7 @@
 
 The mock provider API currently serves redistributed open data (SkillCorner V3 A-League) under a single shared bearer token, intentionally documented as public. Two upcoming use cases require the same API surface to also gate restricted content:
 
-1. **PFF FIFA World Cup 2022** — access granted to the repo owner; licence terms being clarified with the source. Treated as restricted until clarification arrives in writing. Roughly 64 matches plus tournament-level reference files.
+1. **Gradient Sports FIFA World Cup 2022** — access granted to the repo owner; licence terms being clarified with the source. Treated as restricted until clarification arrives in writing. Roughly 64 matches plus tournament-level reference files.
 2. **Soccermatics Pro cohort data** — restricted by course enrolment terms. Provider identity not yet known; may overlap with a provider already in the public tier.
 
 The goal is a single, formal API the Lakehouse adapter can call regardless of whether content is open or restricted. Mixing tiers cleanly — including within a single real-world provider — is a hard requirement.
@@ -126,7 +126,7 @@ Visibility is **not** a property of the provider. The same real-world provider c
 
 ```json
 {
-  "provider": "pff",
+  "provider": "gradient-sports",
   "matches": [
     {
       "id": "example-001",
@@ -143,8 +143,8 @@ Visibility is **not** a property of the provider. The same real-world provider c
       "provenance": "original",
       "updated_at": "2026-05-02T14:23:11Z",
       "source": {
-        "name": "PFF FC",
-        "url": "https://www.pff.com/",
+        "name": "Gradient Sports",
+        "url": "https://www.gradientsports.com/",
         "licence": "Restricted; redistribution not permitted pending licence clarification"
       }
     }
@@ -152,7 +152,7 @@ Visibility is **not** a property of the provider. The same real-world provider c
 }
 ```
 
-Identifiers and team names in the example above are illustrative — the spec deliberately does not commit any (provider id → real entity) mapping for PFF or any other restricted provider, since that mapping is itself the licensed data the redistribution-licence gate (§8.3) protects.
+Identifiers and team names in the example above are illustrative — the spec deliberately does not commit any (provider id → real entity) mapping for Gradient Sports or any other restricted provider, since that mapping is itself the licensed data the redistribution-licence gate (§8.3) protects.
 
 `visibility` is required on new entries. For backwards compatibility, missing `visibility` is treated as `"public"` (matches the historical assumption for redistributed open data).
 
@@ -170,9 +170,9 @@ The full canonical shape of a match entry is defined by a Pydantic model `MatchE
 
 If filtering produces an empty list and the underlying `matches.json` is non-empty, the response is still 200 with `{"matches": []}` — not 404 — so the public tier cannot probe for the existence of any private matches.
 
-`list_providers` returns the same provider list to both tiers — explicitly. Rationale: the *existence* of a provider is not a secret; the per-match visibility flag is the only enforcement boundary. Hiding providers from the public tier would force the Lakehouse adapter to know which providers it has access to out-of-band, which is the opposite of what an API is for. A consumer hitting `/v1/pff/matches` with the public token sees an empty matches list — which is correct: `pff` exists, you just don't have access to anything in it.
+`list_providers` returns the same provider list to both tiers — explicitly. Rationale: the *existence* of a provider is not a secret; the per-match visibility flag is the only enforcement boundary. Hiding providers from the public tier would force the Lakehouse adapter to know which providers it has access to out-of-band, which is the opposite of what an API is for. A consumer hitting `/v1/gradient-sports/matches` with the public token sees an empty matches list — which is correct: `gradient-sports` exists, you just don't have access to anything in it.
 
-A unit test (`test_public_tier_sees_pff_in_provider_list`) pins this behaviour so a future contributor doesn't quietly add tier filtering thinking it tightens security.
+A unit test (`test_public_tier_sees_gradient_sports_in_provider_list`) pins this behaviour so a future contributor doesn't quietly add tier filtering thinking it tightens security.
 
 `list_players` and `get_player` (section 6) follow the same rule for unknown-provider 404 as `list_matches`: gate on `providers.json` membership before reading the per-provider index, so an unknown provider returns 404 from every endpoint and the public tier cannot enumerate the provider namespace by behaviour fingerprinting.
 
@@ -212,7 +212,7 @@ karstenskyt-pining-for-the-data/
 │       ├── players.json                # private-tier player reference
 │       └── soccermatics_match_42/
 │           └── ...
-└── pff/
+└── gradient-sports/
     ├── matches.json                    # all-private initially
     └── _private/
         ├── players.json                # ~2,300 player records, all private
@@ -225,13 +225,13 @@ karstenskyt-pining-for-the-data/
             └── ...
 ```
 
-The `example-NNN` IDs above are placeholders. Real PFF IDs are short numeric strings (e.g., 4–5 digits); they're not pinned to specific match identities in this spec because that mapping is itself the licensed data the redistribution-licence gate (§8.3) protects.
+The `example-NNN` IDs above are placeholders. Real Gradient Sports IDs are short numeric strings (e.g., 4–5 digits); they're not pinned to specific match identities in this spec because that mapping is itself the licensed data the redistribution-licence gate (§8.3) protects.
 
 ### 5.2 Reserved-segment rules
 
 - All path parameters (`{provider}`, `{id}`, `{artifact}`, `{name}`) MUST match `^[a-zA-Z0-9][a-zA-Z0-9_-]*$` and be 128 characters or fewer. The leading-alphanumeric requirement is what reserves leading `_` for namespace markers (`_private` is currently the only one). Underscores remain valid mid-string (e.g., `game_03`).
 - The same regex governs upload tooling, so it is impossible to write S3 objects under a path that the API cannot then validate as input.
-- Future providers MUST choose IDs that satisfy the regex. PFF's short numeric IDs and SkillCorner's `game_NN`-style IDs both qualify.
+- Future providers MUST choose IDs that satisfy the regex. Gradient Sports' short numeric IDs and SkillCorner's `game_NN`-style IDs both qualify.
 - `pining-upload` writes to `{provider}/_private/{game_id}/...` when `--visibility private` is passed; otherwise to `{provider}/{game_id}/...` as today.
 - `pining-upload-players` (section 6.4) writes the index to `{provider}/players.json` (public) or `{provider}/_private/players.json` (private), depending on visibility.
 - Handlers resolve the prefix from the recorded visibility, never by trial-and-error scanning. This avoids any timing channel that could distinguish private-but-tier-rejected from genuinely-absent.
@@ -255,13 +255,13 @@ GET /v1/{provider}/players/{id}         → individual player record
 
 Both endpoints require the same auth as existing endpoints. Tier filtering and uniform-404 semantics carry over from sections 4.2 and 4.3.
 
-**Reserved query parameters.** The `/players` list endpoint reserves `?limit=`, `?offset=`, `?cursor=`, `?team_id=`, and `?competition_id=` for forward-compatible pagination and filtering. v1 ignores these silently (the API serves the full catalogue regardless). They are documented as reserved so a future implementation can switch them on without consumers needing to re-think URL construction or request signing. v1 catalogues fit comfortably in the Lambda 6 MB sync response cap (PFF WC2022 ≈ 500 KB for 2,322 players); pagination becomes load-bearing when a single provider catalogue exceeds ~5 MB.
+**Reserved query parameters.** The `/players` list endpoint reserves `?limit=`, `?offset=`, `?cursor=`, `?team_id=`, and `?competition_id=` for forward-compatible pagination and filtering. v1 ignores these silently (the API serves the full catalogue regardless). They are documented as reserved so a future implementation can switch them on without consumers needing to re-think URL construction or request signing. v1 catalogues fit comfortably in the Lambda 6 MB sync response cap (Gradient Sports WC2022 ≈ 500 KB for 2,322 players); pagination becomes load-bearing when a single provider catalogue exceeds ~5 MB.
 
 ### 6.2 Access pattern
 
 Industry providers expose a list endpoint as the primary access pattern: consumers fetch the whole catalogue once, cache it locally, and join client-side. Individual `/players/{id}` exists for sparse-access convenience. Range/multi-id queries (e.g., `?ids=1,2,3`) are not idiomatic and not implemented.
 
-For PFF World Cup 2022 (~2,322 records, ~350 KB JSON), the full list comfortably fits in a single response. Pagination is deferred until a provider's catalogue exceeds ~5 MB. Optional query filters on the list endpoint (`?team_id=`, `?competition_id=`) can be added later without breaking changes.
+For Gradient Sports World Cup 2022 (~2,322 records, ~350 KB JSON), the full list comfortably fits in a single response. Pagination is deferred until a provider's catalogue exceeds ~5 MB. Optional query filters on the list endpoint (`?team_id=`, `?competition_id=`) can be added later without breaking changes.
 
 ### 6.3 Index format and canonical player record
 
@@ -271,7 +271,7 @@ A canonical player record is defined here so a future provider's data shape does
 
 **Required fields:**
 - `id` (string): provider-stable player identifier; matches `^[a-zA-Z0-9][a-zA-Z0-9_-]*$`. Provider IDs need not be globally unique across providers (different providers may both use a numeric id `1234` for unrelated players); the `(provider, id)` pair is the global key.
-- One of (`nickname`) **or** (`firstName` + `lastName`): at least one human-readable name handle is required. PFF supplies all three.
+- One of (`nickname`) **or** (`firstName` + `lastName`): at least one human-readable name handle is required. Gradient Sports supplies all three.
 - `visibility`: `"public"` or `"private"`. Set by the upload tooling, not the source data.
 - `updated_at`: ISO 8601 UTC timestamp; same semantics as `matches.json` `updated_at` — set on every write, including no-op re-uploads.
 
@@ -280,17 +280,17 @@ A canonical player record is defined here so a future provider's data shape does
 - `dob`: ISO 8601 date string `YYYY-MM-DD`
 - `height`: number, centimetres
 - `position`: free-text positional code (single position; provider-defined vocabulary)
-- `positionGroupType`: free-text grouped positional code (e.g., PFF's `D`, `M`, `F`, `GK`)
-- `nationality`: ISO 3166-1 alpha-3 country code (recognised; not required by PFF data)
+- `positionGroupType`: free-text grouped positional code (e.g., Gradient Sports' `D`, `M`, `F`, `GK`)
+- `nationality`: ISO 3166-1 alpha-3 country code (recognised; not required by Gradient Sports data)
 - `source`: object with `name`, `url`, `licence` strings
 
-**Provider-specific extensions.** Anything beyond the canonical fields is allowed and round-tripped verbatim — `additionalProperties: true` in the JSON Schema. A consumer reading the canonical schema can safely ignore unknown fields. This keeps PFF's pass-through fidelity (any field PFF ships is preserved) without requiring the canonical schema to enumerate every provider's bespoke columns.
+**Provider-specific extensions.** Anything beyond the canonical fields is allowed and round-tripped verbatim — `additionalProperties: true` in the JSON Schema. A consumer reading the canonical schema can safely ignore unknown fields. This keeps Gradient Sports' pass-through fidelity (any field Gradient Sports ships is preserved) without requiring the canonical schema to enumerate every provider's bespoke columns.
 
-**Example (PFF):**
+**Example (Gradient Sports):**
 
 ```json
 {
-  "provider": "pff",
+  "provider": "gradient-sports",
   "players": [
     {
       "id": "example-007",
@@ -303,8 +303,8 @@ A canonical player record is defined here so a future provider's data shape does
       "visibility": "private",
       "updated_at": "2026-05-02T14:23:11Z",
       "source": {
-        "name": "PFF FC",
-        "url": "https://www.pff.com/",
+        "name": "Gradient Sports",
+        "url": "https://www.gradientsports.com/",
         "licence": "Restricted; redistribution not permitted pending licence clarification"
       }
     }
@@ -312,7 +312,7 @@ A canonical player record is defined here so a future provider's data shape does
 }
 ```
 
-Field names mirror the source provider's conventions for pass-through fidelity (`firstName`, `lastName`, `positionGroupType` here are PFF's). Cross-provider normalisation, if ever wanted, belongs in the Lakehouse adapter, not in this API.
+Field names mirror the source provider's conventions for pass-through fidelity (`firstName`, `lastName`, `positionGroupType` here are Gradient Sports'). Cross-provider normalisation, if ever wanted, belongs in the Lakehouse adapter, not in this API.
 
 ### 6.3.1 Cross-tier ID precedence
 
@@ -333,15 +333,15 @@ The unknown-provider 404 matches `list_matches`'s behaviour (which 404s on `NoSu
 
 ### 6.5 Upload tooling
 
-New CLI: `pining-upload-players`. Input is canonical-JSON only — a list of `PlayerRecord` objects matching the schema in section 6.3. Provider-specific shapes (PFF's CSV, future providers' formats) are normalised to canonical JSON by a one-shot script under `scripts/` before upload, not by the CLI itself. This keeps the CLI and Lambda handlers free of per-provider branching, and forces the canonical schema to be the explicit contract every provider goes through.
+New CLI: `pining-upload-players`. Input is canonical-JSON only — a list of `PlayerRecord` objects matching the schema in section 6.3. Provider-specific shapes (Gradient Sports' CSV, future providers' formats) are normalised to canonical JSON by a one-shot script under `scripts/` before upload, not by the CLI itself. This keeps the CLI and Lambda handlers free of per-provider branching, and forces the canonical schema to be the explicit contract every provider goes through.
 
 ```bash
 pining-upload-players players.json \
-  --provider pff \
+  --provider gradient-sports \
   --bucket karstenskyt-pining-for-the-data \
   --visibility private \
-  --source-name "PFF FC" \
-  --source-url "https://www.pff.com/" \
+  --source-name "Gradient Sports" \
+  --source-url "https://www.gradientsports.com/" \
   --source-licence "Restricted; redistribution not permitted pending licence clarification"
 ```
 
@@ -352,7 +352,7 @@ If the operator passes a CSV (or any non-JSON file), the CLI rejects it before r
 ```
 pining-upload-players accepts canonical JSON only (a list of PlayerRecord objects, or {"players": [...]}).
 CSV input is not supported by this CLI — provider-specific shapes must be normalised to canonical JSON
-by a provider-specific adapter. See scripts/upload_pff_wc2022.py for a worked example.
+by a provider-specific adapter. See scripts/upload_gradient_wc2022.py for a worked example.
 ```
 
 The error names the reference adapter so the operator's next step is obvious without reading the spec.
@@ -364,9 +364,9 @@ Behaviour:
 4. **Cross-tier dedup check.** Before writing, the CLI reads BOTH `{provider}/players.json` and `{provider}/_private/players.json`. If any incoming `id` already exists in the *other* tier, the upload fails. This catches the "tier mixing for a single player ID" case described in section 6.3.1, including the case where a public record exists for some `id` and a private re-upload would silently shadow it (or vice versa).
 5. Re-tiering an existing record (changing its visibility) is not supported in v1 — the CLI rejects it. The manual procedure is documented in section 11.
 
-**Justification for canonical JSON-only input.** The original sketch had `pining-upload-players` autodetect CSV vs JSON. That made it convenient to throw PFF's CSV at the CLI directly, but it also meant PFF's column names became the de-facto canonical shape via the path of least resistance. Forcing canonical JSON makes the schema boundary explicit: a new provider must write a CSV→canonical adapter (or use whatever shape they natively ship in) and that adapter is reviewable code, not a hidden code path inside the CLI.
+**Justification for canonical JSON-only input.** The original sketch had `pining-upload-players` autodetect CSV vs JSON. That made it convenient to throw Gradient Sports' CSV at the CLI directly, but it also meant Gradient Sports' column names became the de-facto canonical shape via the path of least resistance. Forcing canonical JSON makes the schema boundary explicit: a new provider must write a CSV→canonical adapter (or use whatever shape they natively ship in) and that adapter is reviewable code, not a hidden code path inside the CLI.
 
-For PFF specifically, the CSV→canonical adapter lives in `scripts/upload_pff_wc2022.py` (section 8.3) — the same script that orchestrates the per-match uploads. PFF's columns (`dob`, `firstName`, `height`, `id`, `lastName`, `nickname`, `positionGroupType`) map directly to canonical fields with no semantic translation; the adapter is a few lines of `csv.DictReader` plus type coercion.
+For Gradient Sports specifically, the CSV→canonical adapter lives in `scripts/upload_gradient_wc2022.py` (section 8.3) — the same script that orchestrates the per-match uploads. Gradient Sports' columns (`dob`, `firstName`, `height`, `id`, `lastName`, `nickname`, `positionGroupType`) map directly to canonical fields with no semantic translation; the adapter is a few lines of `csv.DictReader` plus type coercion.
 
 ### 6.6 JSON Schemas and Pydantic models
 
@@ -395,13 +395,13 @@ The drift test (asserts `model.model_json_schema()` matches the committed file) 
 
 ### 6.7 What we do NOT do
 
-- **No `/competitions` endpoint for v1.** PFF's `competitions.csv` is essentially a directory of match IDs by tournament — that's already reachable via `GET /v1/pff/matches` (which can be extended with a `?competition_id=` filter when needed). Republishing it as a separate resource would duplicate the navigation already provided by `/matches`.
+- **No `/competitions` endpoint for v1.** Gradient Sports' `competitions.csv` is essentially a directory of match IDs by tournament — that's already reachable via `GET /v1/gradient-sports/matches` (which can be extended with a `?competition_id=` filter when needed). Republishing it as a separate resource would duplicate the navigation already provided by `/matches`.
 - **No `/teams` endpoint for v1.** Per-match `metadata.json` already carries the team object (`{id, name, shortName, kit}`). There's no team-level data not already on matches. Easy to add later if a future provider ships team-level reference data not derivable from matches.
 - **No generic `/files` escape hatch.** If a future provider ships something that genuinely doesn't fit a noun (a PDF schema, a binary calibration file), we'll add a noun for it then. Designing a generic escape hatch up front incentivises lazy modelling.
 
 ## 7. Audit logging
 
-CloudTrail data events on the data bucket. Enabled at deploy time, not deferred — the licence ambiguity around the initial PFF load makes a defensible access trail valuable from day one.
+CloudTrail data events on the data bucket. Enabled at deploy time, not deferred — the licence ambiguity around the initial Gradient Sports load makes a defensible access trail valuable from day one.
 
 ### 7.1 Components
 
@@ -460,9 +460,9 @@ The flag is recorded in the match entry; downstream tooling and the API resolve 
 
 The canonical spelling for the `--source-licence` flag and the `licence` field in records is **British** — both upload CLIs (`pining-upload`, `pining-upload-players`) accept it. The American `--source-license` is accepted as a quiet alias on both CLIs (no deprecation warning; both spellings coexist indefinitely). The internal field name in the JSON output is always `licence` (British), regardless of which flag spelling was used at the CLI. Picking one canonical form prevents the "two-CLI inconsistency" caused by the original sketch shipping `--source-license` in `pining-upload` and `--source-licence` in `pining-upload-players` — which would have made operator-facing scripts brittle to which command they invoke.
 
-### 8.3 PFF-specific upload helper
+### 8.3 Gradient Sports-specific upload helper
 
-For the initial PFF World Cup 2022 load, the source layout is:
+For the initial Gradient Sports World Cup 2022 load, the source layout is:
 
 ```
 FIFA World Cup 2022/
@@ -472,10 +472,10 @@ FIFA World Cup 2022/
 ├── Tracking Data/{id}.jsonl.bz2
 ├── competitions.csv          # not uploaded — directory data covered by /matches
 ├── players.csv               # tournament-level → pining-upload-players
-└── PFF FC Change Log.docx    # not uploaded
+└── Gradient Sports Change Log.docx    # not uploaded
 ```
 
-A small adapter script (`scripts/upload_pff_wc2022.py`) is the right shape for this. Provider-specific reshaping doesn't belong in the public package surface, and `scripts/` is the conventional home for ops one-shots that should be checked in for repeatability without being shipped to consumers.
+A small adapter script (`scripts/upload_gradient_wc2022.py`) is the right shape for this. Provider-specific reshaping doesn't belong in the public package surface, and `scripts/` is the conventional home for ops one-shots that should be checked in for repeatability without being shipped to consumers.
 
 The script:
 
@@ -489,20 +489,20 @@ The script:
    └── tracking.jsonl.bz2
    ```
 3. Reads `Metadata/{id}.json` to extract `date`, `home.name`, `away.name`.
-4. Invokes `pining-upload --provider pff --game-id {id} --visibility private --provenance original --source-name "PFF FC" --source-url "https://www.pff.com/" --source-licence "Restricted; redistribution not permitted pending licence clarification"` with those values.
-5. After all matches: reads `players.csv`, normalises each row into a canonical `PlayerRecord` JSON dict (renaming/coercing fields to match the schema in section 6.3), writes the normalised list to a temp `players.json`, then invokes `pining-upload-players players.json --provider pff --visibility private --source-licence "..."` with the same source metadata. The CSV→canonical normaliser lives in this script; `pining-upload-players` only consumes canonical JSON (per section 6.5).
+4. Invokes `pining-upload --provider gradient-sports --game-id {id} --visibility private --provenance original --source-name "Gradient Sports" --source-url "https://www.gradientsports.com/" --source-licence "Restricted; redistribution not permitted pending licence clarification"` with those values.
+5. After all matches: reads `players.csv`, normalises each row into a canonical `PlayerRecord` JSON dict (renaming/coercing fields to match the schema in section 6.3), writes the normalised list to a temp `players.json`, then invokes `pining-upload-players players.json --provider gradient-sports --visibility private --source-licence "..."` with the same source metadata. The CSV→canonical normaliser lives in this script; `pining-upload-players` only consumes canonical JSON (per section 6.5).
 
-`competitions.csv` is intentionally not uploaded. It is a tournament-level directory of match IDs, which is fully reachable via `GET /v1/pff/matches` once all 64 matches are loaded. Republishing it as a separate resource would duplicate navigation that the matches endpoint already provides.
+`competitions.csv` is intentionally not uploaded. It is a tournament-level directory of match IDs, which is fully reachable via `GET /v1/gradient-sports/matches` once all 64 matches are loaded. Republishing it as a separate resource would duplicate navigation that the matches endpoint already provides.
 
 The script is idempotent: re-running re-uploads everything but produces no duplicate index entries. Useful both for the initial load and for re-runs after correcting any per-match metadata.
 
 ### 8.3.1 Post-load verification
 
-After the bulk load (or after any future bulk-load of a different provider), `scripts/verify_pff_load.py` (and the analogous `verify_<provider>_load.py` for future providers) runs an automated post-condition check that exits non-zero on:
+After the bulk load (or after any future bulk-load of a different provider), `scripts/verify_gradient_load.py` (and the analogous `verify_<provider>_load.py` for future providers) runs an automated post-condition check that exits non-zero on:
 
-- match count mismatch (owner-tier `/pff/matches` does not return exactly 67 entries)
-- player count mismatch (owner-tier `/pff/players` does not return exactly 2,322 entries)
-- visibility leak (public-tier `/pff/matches` or `/pff/players` returns any entries)
+- match count mismatch (owner-tier `/gradient-sports/matches` does not return exactly 67 entries)
+- player count mismatch (owner-tier `/gradient-sports/players` does not return exactly 2,322 entries)
+- visibility leak (public-tier `/gradient-sports/matches` or `/gradient-sports/players` returns any entries)
 - artifact-fetch failure on a small spot-check set (e.g., 5 random matches × 4 artifacts each, owner-tier presigned-URL follow returns 200 + non-empty body)
 - player spot-check failure (specific known-good IDs return 200 with the expected `firstName`/`lastName`)
 
@@ -542,8 +542,8 @@ Existing data is unaffected. Concretely:
 2. Deploy the updated stack: storage module unchanged, audit module new, functions module gains `list_players` and `get_player` plus the SSM IAM grant, api module gains the `/players` routes.
 3. `pining-upload` existing entries continue to work — they have no `visibility` field, are treated as public, served to both tiers.
 4. Backfill `visibility: "public"` into existing `matches.json` entries opportunistically (next time each is re-uploaded for any reason). No urgency — the missing-means-public default is forward-compatible.
-5. Verify the deployed stack with one PFF match before bulk-loading the rest.
-6. Run `scripts/upload_pff_wc2022.py` to load the 64 matches plus the player catalogue.
+5. Verify the deployed stack with one Gradient Sports match before bulk-loading the rest.
+6. Run `scripts/upload_gradient_wc2022.py` to load the 64 matches plus the player catalogue.
 
 No data movement of existing public matches. No breaking change to any existing API response (every new field is additive, every new endpoint is on a new path).
 
@@ -555,21 +555,21 @@ If a second private consumer is ever onboarded with access to a subset of privat
 ### 11.2 Automated token rotation
 Manual SSM rotation is sufficient for a single-user setup. If the operational pattern ever changes (multiple consumers, scheduled rotation policy), swap the SSM parameter for a Secrets Manager secret and add a rotation Lambda. The application-side change is two lines of boto3.
 
-### 11.3 PFF licence clarification
+### 11.3 Gradient Sports licence clarification
 Licence clarification has been requested from the source; awaiting response. Three outcomes change the design posture:
 
-- **Confirmed open / formal permissive licence**: re-upload PFF content as public-tier; the provider stays one logical entity; no API change beyond `pining-upload --visibility public` for the same content (or a small helper to flip visibility on existing entries).
+- **Confirmed open / formal permissive licence**: re-upload Gradient Sports content as public-tier; the provider stays one logical entity; no API change beyond `pining-upload --visibility public` for the same content (or a small helper to flip visibility on existing entries).
 - **Confirmed restricted**: keep current design; record the licence text exactly as given.
 - **No response**: stay private indefinitely. Re-evaluate after a reasonable window.
 
 ### 11.4 Re-tiering procedure (manual)
 
-v1 doesn't ship a `pining-retier` CLI; the upload tooling rejects any re-upload that flips a match's or player's visibility (section 8.2). Re-tiering is a deliberately rare operation (typically: PFF licence clarifies as permissive, and 64 matches need to flip from private to public). The manual procedure:
+v1 doesn't ship a `pining-retier` CLI; the upload tooling rejects any re-upload that flips a match's or player's visibility (section 8.2). Re-tiering is a deliberately rare operation (typically: Gradient Sports licence clarifies as permissive, and 64 matches need to flip from private to public). The manual procedure:
 
-1. **Plan the move.** List affected match IDs (or player IDs) up front. For PFF: every match in `matches.json`. For a partial re-tier: the explicit subset.
-2. **Copy the S3 objects to the new prefix.** For each match: `aws s3 cp --recursive s3://$BUCKET/pff/_private/$MATCH_ID/ s3://$BUCKET/pff/$MATCH_ID/`. For the players index: copy the file to its new tier path.
+1. **Plan the move.** List affected match IDs (or player IDs) up front. For Gradient Sports: every match in `matches.json`. For a partial re-tier: the explicit subset.
+2. **Copy the S3 objects to the new prefix.** For each match: `aws s3 cp --recursive s3://$BUCKET/gradient-sports/_private/$MATCH_ID/ s3://$BUCKET/gradient-sports/$MATCH_ID/`. For the players index: copy the file to its new tier path.
 3. **Edit `matches.json` (and `players.json`) under optimistic concurrency control.** Read the current index, capture its S3 ETag from the GET response (`obj["ETag"]`), flip every affected entry's `visibility` field, update `updated_at` to the current UTC time, write back via `s3.put_object(..., IfMatch=<previous_etag>)`. The conditional write fails fast (S3 returns 412 Precondition Failed) if the index was modified between read and write — typically by a concurrent `pining-upload` invocation. The operator handles failure by re-reading and retrying. A small one-shot Python script using boto3 is the right shape — do not hand-edit JSON.
-4. **Delete the old objects.** `aws s3 rm --recursive s3://$BUCKET/pff/_private/$MATCH_ID/` after step 2 has succeeded for every match. Skipping this leaves orphan files in the old prefix, invisible to the API but billed for storage. CloudTrail (section 7) captures the deletes.
+4. **Delete the old objects.** `aws s3 rm --recursive s3://$BUCKET/gradient-sports/_private/$MATCH_ID/` after step 2 has succeeded for every match. Skipping this leaves orphan files in the old prefix, invisible to the API but billed for storage. CloudTrail (section 7) captures the deletes.
 5. **Verify.** Run the post-load verification script (section 8.3.1) against the new tier configuration: counts unchanged, public-tier now sees what owner-tier saw (or the agreed subset), no 404s on previously-working artifacts.
 
 The orphan-file risk in step 4 is the main reason this isn't a one-button CLI: a pining-retier helper that did steps 2 and 3 but forgot step 4 would silently degrade to "data exists in two places, only one is served, storage doubles" — the kind of failure that goes unnoticed for months. A documented manual procedure makes the operator do step 4 deliberately.
@@ -597,7 +597,7 @@ Cost vs current single-token model: one extra SSM parameter, one cleanup Lambda,
 Unit (in `src/tests/test_lambda_handlers.py`):
 
 - `validate_token` returns `Tier.PUBLIC` for the public token, `Tier.OWNER` for the owner token, error response for any other input. Duplicate-token misconfiguration classifies as `Tier.PUBLIC` (fail closed; section 3.2).
-- `list_providers` returns the same provider list to both tiers (`test_public_tier_sees_pff_in_provider_list`).
+- `list_providers` returns the same provider list to both tiers (`test_public_tier_sees_gradient_sports_in_provider_list`).
 - `list_matches` returns only public entries to the public tier; returns all entries to the owner tier; returns 200 with empty list (not 404) when filtering removes everything; returns 404 for unknown providers.
 - `list_players` mirrors the same tier-filter semantics: public tier sees only `players.json`; owner tier sees the merge of `players.json` and `_private/players.json`. Returns 404 for unknown providers (gated on `providers.json` membership). Cross-tier ID collision: owner-tier sees the private record (private wins; section 6.3.1).
 - `get_artifact` returns 404 (not 403) for `visibility=private` matches accessed with the public tier; returns 302 for the same match accessed with the owner tier.
@@ -615,18 +615,18 @@ Schema-drift test (in `src/tests/test_schemas.py`):
 Upload-CLI tests (in `src/tests/test_upload.py` and `src/tests/test_upload_players.py`):
 
 - `pining-upload` writes to `_private/` when `--visibility private`; rejects tier mixing on re-upload of an existing match ID; `--source-license` is accepted as alias for `--source-licence`; output JSON always uses `licence` (British) regardless of which input flag was used.
-- `pining-upload-players` consumes canonical JSON only; rejects CSV input with the exact message documented in §6.5 (mentioning `scripts/upload_pff_wc2022.py` as the reference adapter); rejects records that fail Pydantic validation; rejects cross-tier ID collision (incoming `id` already exists in the *other* tier's index).
+- `pining-upload-players` consumes canonical JSON only; rejects CSV input with the exact message documented in §6.5 (mentioning `scripts/upload_gradient_wc2022.py` as the reference adapter); rejects records that fail Pydantic validation; rejects cross-tier ID collision (incoming `id` already exists in the *other* tier's index).
 - Schema files at `schemas/{matches,players}.schema.json` embed `$id` (URN form) and `$schema` (`json-schema.org/draft/2020-12/schema`); the drift test asserts both fields are present and match `model.model_json_schema()` output.
 
 Integration:
 
 - End-to-end smoke test against the deployed dev stack with both tokens, asserting tier-correct responses on 1 public + 1 private match, and on `/players` listings/lookups for both tiers.
 - Negative test: attempt `pining-upload --provider _private`, `pining-upload --game-id _private`, and `pining-upload-players --provider _private` — all must fail before any S3 calls.
-- `scripts/verify_pff_load.py` (section 8.3.1) runs after the bulk load and exits non-zero on any post-condition failure.
+- `scripts/verify_gradient_load.py` (section 8.3.1) runs after the bulk load and exits non-zero on any post-condition failure.
 
 Manual:
 
-- Upload one PFF match end-to-end (operator picks any one ID via `$PFF_SMOKE_MATCH_ID`) before bulk-loading the 67. Verify the Lakehouse adapter pulls it cleanly with the owner token and that the public token gets a 404.
+- Upload one Gradient Sports match end-to-end (operator picks any one ID via `$GRADIENT_SMOKE_MATCH_ID`) before bulk-loading the 67. Verify the Lakehouse adapter pulls it cleanly with the owner token and that the public token gets a 404.
 - Verify a CloudTrail data event lands in the audit bucket within a few minutes of an artifact fetch and within a few minutes of a `/matches` or `/players` read.
 - Rotation rehearsal: rotate the owner token via the procedure in section 3.5; confirm the API returns 401 for the old token within ~1 minute of step 2 and 200 for the new token immediately.
 
@@ -636,7 +636,7 @@ Manual:
 - **Duplicate-token classification** → `Tier.PUBLIC` (fail closed). A misconfiguration that accidentally collapses both tokens to the same string degrades the owner consumer (visibly broken) instead of leaking private content (silently broken). Section 3.2.
 - **Consumer onboarding and rotation handshake** → documented inline in section 3.5. No separate `docs/CONSUMER_AUTH.md`; the spec is the canonical reference for the contract between operator and consumer.
 - **Token rotation dual-validity** → not in v1. The API accepts only the current owner token; consumers MUST implement transient-401 retry during the rotation window in either direction (operator-ahead-of-consumer OR consumer-ahead-of-operator both produce random 401s from the in-flight warm-container population). Zero-downtime rotation is sketched in §11.6 as a future upgrade if the operational pattern ever needs it. Section 3.5.
-- **Tournament-level reference data** → in scope for v1, modelled as first-class resource nouns rather than as opaque files. `/players` is the v1 noun, sourced from PFF's `players.csv` via a canonical-JSON normalisation step in `scripts/upload_pff_wc2022.py`. `competitions.csv` is dropped since it duplicates the navigation already provided by `/matches`. `/teams` is deferred — current per-match metadata is sufficient. Section 6.
+- **Tournament-level reference data** → in scope for v1, modelled as first-class resource nouns rather than as opaque files. `/players` is the v1 noun, sourced from Gradient Sports' `players.csv` via a canonical-JSON normalisation step in `scripts/upload_gradient_wc2022.py`. `competitions.csv` is dropped since it duplicates the navigation already provided by `/matches`. `/teams` is deferred — current per-match metadata is sufficient. Section 6.
 - **Canonical schemas** → defined as Pydantic models in `shared.py`, published as JSON Schema files in `schemas/` (with `$id` URN and `$schema` Draft-2020-12 metadata), drift-tested in CI. Both upload CLIs validate against the Pydantic models before any S3 write. Section 6.6.
 - **`updated_at` per entry** → adopted in v1 for both matches and players. ISO 8601 UTC; set on every write including no-op re-uploads. Sufficient for the polling pattern Lakehouse will use; per-artifact ETag/SHA256 deferred until a consumer asks for stronger integrity. Section 4.1, 6.3.
 - **Pagination** → query-param surface (`?limit=&offset=&cursor=&team_id=&competition_id=`) reserved on `/players` in v1; not enforced. v1 catalogues fit in the Lambda 6 MB sync cap. Becomes load-bearing at ~5 MB per provider. Section 6.1, 11.5.
@@ -647,8 +647,8 @@ Manual:
 - **CloudTrail data-event filter** → exclude only `providers.json` reads (true bookkeeping). `matches.json` and `players.json` reads stay logged because enumeration via `/matches` and `/players` is the most likely abuse vector and the trail is its forensic record. Cost stays well under $1/year either way. Section 7.5.
 - **Artifacts as object (name → filename)** → `artifacts` is an object in `matches.json` rather than an array of names. Keys form the whitelist consumed by `get_artifact`; values are the exact filenames that let the API skip per-request S3 listing. One field, both purposes, no `list_objects_v2` on the artifact-fetch hot path. Sections 4.1, 4.3.
 - **CLI flag spelling** → British (`--source-licence`, `licence`) is canonical; American (`--source-license`) is a quiet alias on both upload CLIs. Internal field name is always British. Section 8.2.1.
-- **PFF licence redistribution gate** → no runtime gate for private-tier loads. The script always uploads private; a single-owner private-tier load is the operator moving their own data into their own systems and does not engage redistribution licence concerns. The `SOURCE_LICENCE` constant is recorded as accurate provenance metadata. If a public-tier upload mode is ever added, THAT path will need its own licence-clarification gate. Section 8.3.
-- **Post-load verification** → automated by `scripts/verify_pff_load.py`. Replaces manual `curl` smoke tests, which rot the moment the load is re-run. Section 8.3.1.
-- **CloudTrail audit logging enablement** → enabled at deploy time. Section 7. Cost is well under $1/year and the trail is the defensible record if PFF (or any future restricted-content owner) asks "who downloaded what, when?"
-- **PFF upload helper location** → `scripts/upload_pff_wc2022.py`. Provider-specific reshaping doesn't belong in the public package surface; `scripts/` is the conventional home for repeatable ops one-shots.
+- **Gradient Sports licence redistribution gate** → no runtime gate for private-tier loads. The script always uploads private; a single-owner private-tier load is the operator moving their own data into their own systems and does not engage redistribution licence concerns. The `SOURCE_LICENCE` constant is recorded as accurate provenance metadata. If a public-tier upload mode is ever added, THAT path will need its own licence-clarification gate. Section 8.3.
+- **Post-load verification** → automated by `scripts/verify_gradient_load.py`. Replaces manual `curl` smoke tests, which rot the moment the load is re-run. Section 8.3.1.
+- **CloudTrail audit logging enablement** → enabled at deploy time. Section 7. Cost is well under $1/year and the trail is the defensible record if Gradient Sports (or any future restricted-content owner) asks "who downloaded what, when?"
+- **Gradient Sports upload helper location** → `scripts/upload_gradient_wc2022.py`. Provider-specific reshaping doesn't belong in the public package surface; `scripts/` is the conventional home for repeatable ops one-shots.
 - **API versioning** → no `/v2/` path versioning in v1. Additive-fields contract declared in section 9; v1 has no consumers, so breaking changes are still free until the first external dependency is taken.

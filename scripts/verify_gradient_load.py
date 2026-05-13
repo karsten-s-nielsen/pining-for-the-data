@@ -1,13 +1,13 @@
-"""Post-load verification for the PFF World Cup 2022 dataset.
+"""Post-load verification for the Gradient Sports World Cup 2022 dataset.
 
 Replaces manual curl smoke tests with an automated check that runs after
-scripts/upload_pff_wc2022.py and exits non-zero on any post-condition failure.
+scripts/upload_gradient_wc2022.py and exits non-zero on any post-condition failure.
 
 Checks (spec §8.3.1):
-  - owner-tier /pff/matches returns exactly EXPECTED_MATCH_COUNT entries
-  - owner-tier /pff/players returns exactly EXPECTED_PLAYER_COUNT entries
-  - public-tier /pff/matches and /pff/players return zero entries
-  - public-tier /providers includes 'pff' (existence is not the secret)
+  - owner-tier /gradient-sports/matches returns exactly EXPECTED_MATCH_COUNT entries
+  - owner-tier /gradient-sports/players returns exactly EXPECTED_PLAYER_COUNT entries
+  - public-tier /gradient-sports/matches and /gradient-sports/players return zero entries
+  - public-tier /providers includes 'gradient-sports' (existence is not the secret)
   - 5 random match × 4 artifact owner-tier fetches return 200 + non-empty body
   - sampled players from the live response conform to PlayerRecord canonical shape
 """
@@ -24,7 +24,7 @@ import urllib.request
 from typing import Any
 
 EXPECTED_MATCH_COUNT = 64  # FIFA WC 2022: 48 group-stage + 16 knockout matches
-# Unique player IDs after dedup. PFF CSV has ~2321 (player, team) rows;
+# Unique player IDs after dedup. Gradient Sports CSV has ~2321 (player, team) rows;
 # many players belong to multiple rows (different roster slots).
 EXPECTED_PLAYER_COUNT = 829
 PLAYER_SPOT_CHECK_SAMPLE_SIZE = 5  # sample N players from the response, content-agnostic
@@ -95,7 +95,7 @@ def _get_status(api: str, path: str, token: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify the PFF WC2022 dataset is loaded correctly")
+    parser = argparse.ArgumentParser(description="Verify the Gradient Sports WC2022 dataset is loaded correctly")
     parser.add_argument("--api", required=True, help="API base URL (no trailing slash)")
     parser.add_argument("--owner-token", required=True)
     parser.add_argument("--public-token", required=True)
@@ -107,58 +107,60 @@ def main() -> int:
     # 1. Owner-tier match count
     body: dict = {"matches": []}
     try:
-        body, _ = _get_json(args.api, "/pff/matches", args.owner_token)
+        body, _ = _get_json(args.api, "/gradient-sports/matches", args.owner_token)
         n = len(body.get("matches", []))
         if n != EXPECTED_MATCH_COUNT:
-            failures.append(f"owner /pff/matches: expected {EXPECTED_MATCH_COUNT}, got {n}")
+            failures.append(f"owner /gradient-sports/matches: expected {EXPECTED_MATCH_COUNT}, got {n}")
         else:
-            print(f"OK: owner /pff/matches = {n}")
+            print(f"OK: owner /gradient-sports/matches = {n}")
     except Exception as e:
-        failures.append(f"owner /pff/matches: request failed: {e}")
+        failures.append(f"owner /gradient-sports/matches: request failed: {e}")
 
     matches = body.get("matches", [])
 
     # 2. Owner-tier player count
     try:
-        pbody, _ = _get_json(args.api, "/pff/players", args.owner_token)
+        pbody, _ = _get_json(args.api, "/gradient-sports/players", args.owner_token)
         np_ = len(pbody.get("players", []))
         if np_ != EXPECTED_PLAYER_COUNT:
-            failures.append(f"owner /pff/players: expected {EXPECTED_PLAYER_COUNT}, got {np_}")
+            failures.append(f"owner /gradient-sports/players: expected {EXPECTED_PLAYER_COUNT}, got {np_}")
         else:
-            print(f"OK: owner /pff/players = {np_}")
+            print(f"OK: owner /gradient-sports/players = {np_}")
     except Exception as e:
-        failures.append(f"owner /pff/players: request failed: {e}")
+        failures.append(f"owner /gradient-sports/players: request failed: {e}")
 
     # 3. Public-tier visibility leak checks
     try:
-        body, _ = _get_json(args.api, "/pff/matches", args.public_token)
+        body, _ = _get_json(args.api, "/gradient-sports/matches", args.public_token)
         if body.get("matches"):
             failures.append(
-                f"VISIBILITY LEAK: public /pff/matches returned {len(body['matches'])} entries (expected 0)"
+                f"VISIBILITY LEAK: public /gradient-sports/matches returned {len(body['matches'])} entries (expected 0)"
             )
         else:
-            print("OK: public /pff/matches = 0")
+            print("OK: public /gradient-sports/matches = 0")
     except Exception as e:
-        failures.append(f"public /pff/matches: request failed: {e}")
+        failures.append(f"public /gradient-sports/matches: request failed: {e}")
 
     try:
-        body, _ = _get_json(args.api, "/pff/players", args.public_token)
+        body, _ = _get_json(args.api, "/gradient-sports/players", args.public_token)
         if body.get("players"):
             failures.append(
-                f"VISIBILITY LEAK: public /pff/players returned {len(body['players'])} entries (expected 0)"
+                f"VISIBILITY LEAK: public /gradient-sports/players returned {len(body['players'])} entries (expected 0)"
             )
         else:
-            print("OK: public /pff/players = 0")
+            print("OK: public /gradient-sports/players = 0")
     except Exception as e:
-        failures.append(f"public /pff/players: request failed: {e}")
+        failures.append(f"public /gradient-sports/players: request failed: {e}")
 
-    # 4. public /providers MUST include pff (existence is not the secret; spec §4.2)
+    # 4. public /providers MUST include gradient-sports (existence is not the secret; spec §4.2)
     try:
         body, _ = _get_json(args.api, "/providers", args.public_token)
-        if "pff" not in body.get("providers", []):
-            failures.append("public /providers: 'pff' missing — spec §4.2 says public tier sees all providers")
+        if "gradient-sports" not in body.get("providers", []):
+            failures.append(
+                "public /providers: 'gradient-sports' missing — spec §4.2 says public tier sees all providers"
+            )
         else:
-            print("OK: public /providers contains 'pff'")
+            print("OK: public /providers contains 'gradient-sports'")
     except Exception as e:
         failures.append(f"public /providers: request failed: {e}")
 
@@ -172,7 +174,8 @@ def main() -> int:
         for artifact in ARTIFACTS_PER_MATCH:
             spot_total += 1
             try:
-                status, size = _follow_redirect(args.api, f"/pff/matches/{match_id}/{artifact}", args.owner_token)
+                path = f"/gradient-sports/matches/{match_id}/{artifact}"
+                status, size = _follow_redirect(args.api, path, args.owner_token)
                 if status == 200 and size > 0:
                     spot_pass += 1
                 else:
@@ -186,10 +189,10 @@ def main() -> int:
     # has an id matching the path-param regex, and at least one of nickname /
     # firstName+lastName per spec §6.3.
     try:
-        all_players_body, _ = _get_json(args.api, "/pff/players", args.owner_token)
+        all_players_body, _ = _get_json(args.api, "/gradient-sports/players", args.owner_token)
         all_players = all_players_body.get("players", [])
     except Exception as e:
-        failures.append(f"owner /pff/players for spot-check: failed: {e}")
+        failures.append(f"owner /gradient-sports/players for spot-check: failed: {e}")
         all_players = []
 
     sample_players = rng.sample(all_players, min(PLAYER_SPOT_CHECK_SAMPLE_SIZE, len(all_players)))
@@ -197,7 +200,7 @@ def main() -> int:
     for p in sample_players:
         pid = p.get("id", "")
         try:
-            body, _ = _get_json(args.api, f"/pff/players/{pid}", args.owner_token)
+            body, _ = _get_json(args.api, f"/gradient-sports/players/{pid}", args.owner_token)
             shape_ok = (
                 isinstance(body.get("id"), str)
                 and (body.get("nickname") or (body.get("firstName") and body.get("lastName")))
@@ -215,11 +218,11 @@ def main() -> int:
     if matches:
         any_match = matches[0]["id"]
         any_artifact = next(iter(matches[0].get("artifacts", {}).keys()), "metadata")
-        status = _get_status(args.api, f"/pff/matches/{any_match}/{any_artifact}", args.public_token)
+        status = _get_status(args.api, f"/gradient-sports/matches/{any_match}/{any_artifact}", args.public_token)
         if status != 404:
-            failures.append(f"public /pff/matches/{any_match}/{any_artifact}: expected 404, got {status}")
+            failures.append(f"public /gradient-sports/matches/{any_match}/{any_artifact}: expected 404, got {status}")
         else:
-            print(f"OK: public 404 on private artifact /pff/matches/{any_match}/{any_artifact}")
+            print(f"OK: public 404 on private artifact /gradient-sports/matches/{any_match}/{any_artifact}")
 
     if failures:
         print("\nFAILURES:")

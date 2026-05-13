@@ -8,7 +8,7 @@ Reads a canonical JSON file (a list of PlayerRecord objects, or
 
 CSV input is explicitly rejected (spec §6.5) — provider-specific shapes must
 be normalised to canonical JSON by a provider-specific adapter; see
-scripts/upload_pff_wc2022.py for a worked example.
+scripts/upload_gradient_wc2022.py for a worked example.
 
 Existing players (by id, within the same tier) are updated in place; new
 players are appended; updated_at is set on every write.
@@ -35,7 +35,7 @@ _CSV_REJECTION_MESSAGE = (
     "pining-upload-players accepts canonical JSON only (a list of PlayerRecord objects, "
     'or {"players": [...]}).\n'
     "CSV input is not supported by this CLI — provider-specific shapes must be normalised "
-    "to canonical JSON by a provider-specific adapter. See scripts/upload_pff_wc2022.py for "
+    "to canonical JSON by a provider-specific adapter. See scripts/upload_gradient_wc2022.py for "
     "a worked example."
 )
 
@@ -149,7 +149,7 @@ def main() -> None:
         description="Upload a canonical-JSON player catalogue to the mock provider API's S3 bucket"
     )
     parser.add_argument("input_file", type=Path, help="Canonical JSON file with player records")
-    parser.add_argument("--provider", required=True, help="Provider name (e.g., pff)")
+    parser.add_argument("--provider", required=True, help="Provider name (e.g., gradient-sports)")
     parser.add_argument(
         "--bucket",
         required=False,

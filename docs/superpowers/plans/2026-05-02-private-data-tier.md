@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a two-tier auth model (public + owner) to the mock provider API, expose private match data and a player reference resource (`/players`), enable CloudTrail audit logging, and load the PFF FIFA World Cup 2022 dataset (64 matches + 2,322 players) as the first restricted-tier content.
+**Goal:** Add a two-tier auth model (public + owner) to the mock provider API, expose private match data and a player reference resource (`/players`), enable CloudTrail audit logging, and load the Gradient Sports FIFA World Cup 2022 dataset (64 matches + 2,322 players) as the first restricted-tier content.
 
 **Architecture:** A second bearer token (`owner`), stored in SSM Parameter Store, is accepted by every Lambda alongside the existing public token. `validate_token` returns a tier (`PUBLIC` or `OWNER`) used to filter list responses and enforce uniform-404 on artifact/player retrieval for tier mismatches. Match visibility is recorded per-entry in `matches.json`; private matches and the private player index live under a reserved `_private/` S3 prefix for defense in depth. A new resource family `/players` follows the same shape as `/matches`. CloudTrail data events on the data bucket land in a separate audit bucket with a 365-day retention policy.
 
@@ -34,7 +34,7 @@
 
 **Python CLI** (`src/mock_api/`):
 - `upload.py` — modified: `--visibility` flag, `--source-licence` flag (with `--source-license` alias), `_`-prefix rejection, write to `_private/` when private, set `updated_at` on every write, write `artifacts` as `{name: filename}` object form, validate against `MatchEntry` Pydantic model before any S3 call.
-- `upload_players.py` — new: `pining-upload-players` CLI. Canonical JSON only — explicitly rejects CSV with a message pointing at `scripts/upload_pff_wc2022.py` as the reference adapter. Validates every record against `PlayerRecord`. Cross-tier dedup check across both `players.json` files. British spelling canonical, American alias.
+- `upload_players.py` — new: `pining-upload-players` CLI. Canonical JSON only — explicitly rejects CSV with a message pointing at `scripts/upload_gradient_wc2022.py` as the reference adapter. Validates every record against `PlayerRecord`. Cross-tier dedup check across both `players.json` files. British spelling canonical, American alias.
 
 **Project config** (`pyproject.toml`):
 - modified: add `pining-upload-players` entry point. Add `pydantic>=2` and `jsonschema` to runtime dependencies.
@@ -50,9 +50,9 @@
 - `test_schemas.py` — new: drift test asserting committed `schemas/*.json` matches `model.model_json_schema()` for current Pydantic models, including `$id` URN and `$schema` Draft-2020-12 metadata.
 
 **Scripts** (`scripts/`):
-- `upload_pff_wc2022.py` — new: one-shot PFF reshape + load orchestrator. Loads private-tier only — no runtime licence gate (single-owner private-tier load is data movement within the operator's own systems, not redistribution; spec §8.3). Includes a CSV→canonical-JSON normaliser for `players.csv` (since `pining-upload-players` no longer accepts CSV).
+- `upload_gradient_wc2022.py` — new: one-shot Gradient Sports reshape + load orchestrator. Loads private-tier only — no runtime licence gate (single-owner private-tier load is data movement within the operator's own systems, not redistribution; spec §8.3). Includes a CSV→canonical-JSON normaliser for `players.csv` (since `pining-upload-players` no longer accepts CSV).
 - `regenerate_schemas.py` — new: emits `schemas/{matches,players}.schema.json` from the Pydantic models. Run after any model edit.
-- `verify_pff_load.py` — new: post-load verification (counts, visibility leak check, owner-tier artifact spot-check, player spot-check). Exits non-zero on any failure.
+- `verify_gradient_load.py` — new: post-load verification (counts, visibility leak check, owner-tier artifact spot-check, player spot-check). Exits non-zero on any failure.
 
 ---
 
@@ -1266,10 +1266,10 @@ class TestUploadVisibility:
         s3.get_object.side_effect = s3.exceptions.NoSuchKey()
 
         with patch("mock_api.upload.boto3.client", return_value=s3):
-            upload_game(game_dir, provider="pff", game_id="m-001", bucket="b", visibility="private")
+            upload_game(game_dir, provider="gradient-sports", game_id="m-001", bucket="b", visibility="private")
 
         upload_keys = [c.args[2] for c in s3.upload_file.call_args_list]
-        assert any(k == "pff/_private/m-001/match.json" for k in upload_keys)
+        assert any(k == "gradient-sports/_private/m-001/match.json" for k in upload_keys)
 
     def test_private_visibility_and_updated_at_and_artifacts_object_recorded(self, tmp_path):
         from unittest.mock import MagicMock, patch
@@ -1286,10 +1286,10 @@ class TestUploadVisibility:
         s3.get_object.side_effect = s3.exceptions.NoSuchKey()
 
         with patch("mock_api.upload.boto3.client", return_value=s3):
-            upload_game(game_dir, provider="pff", game_id="m-001", bucket="b", visibility="private")
+            upload_game(game_dir, provider="gradient-sports", game_id="m-001", bucket="b", visibility="private")
 
         # Find the put_object call that wrote matches.json
-        matches_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "pff/matches.json"]
+        matches_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "gradient-sports/matches.json"]
         assert len(matches_calls) == 1
         body = json.loads(matches_calls[0].kwargs["Body"].decode("utf-8"))
         entry = body["matches"][0]
@@ -1747,13 +1747,13 @@ class TestListMatches(_ResetS3):
         self._setup(monkeypatch)
 
         mock_s3 = _mock_s3()
-        all_private = {"provider": "pff", "matches": [{"id": "m-001", "artifacts": ["m"], "visibility": "private"}]}
+        all_private = {"provider": "gradient-sports", "matches": [{"id": "m-001", "artifacts": ["m"], "visibility": "private"}]}
         body = json.dumps(all_private).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         event = {
             "headers": {"authorization": "Bearer pub-tok"},
-            "pathParameters": {"provider": "pff"},
+            "pathParameters": {"provider": "gradient-sports"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 200
@@ -1788,20 +1788,20 @@ class TestListProviders(_ResetS3):
         shared._get_owner_token.cache_clear()
         monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
 
-    def test_public_tier_sees_pff_in_provider_list(self, monkeypatch) -> None:
+    def test_public_tier_sees_gradient_sports_in_provider_list(self, monkeypatch) -> None:
         from list_providers import handler
         import json
         self._setup(monkeypatch)
 
         mock_s3 = _mock_s3()
-        body = json.dumps({"providers": ["skillcorner", "pff"]}).encode()
+        body = json.dumps({"providers": ["skillcorner", "gradient-sports"]}).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         event = {"headers": {"authorization": "Bearer pub-tok"}}
         result = handler(event, None)
         assert result["statusCode"] == 200
-        # Even though pff is all-private, public tier sees it in the provider catalogue.
-        assert "pff" in json.loads(result["body"])["providers"]
+        # Even though gradient-sports is all-private, public tier sees it in the provider catalogue.
+        assert "gradient-sports" in json.loads(result["body"])["providers"]
 
     def test_owner_tier_sees_same_provider_list(self, monkeypatch) -> None:
         from list_providers import handler
@@ -1809,13 +1809,13 @@ class TestListProviders(_ResetS3):
         self._setup(monkeypatch)
 
         mock_s3 = _mock_s3()
-        body = json.dumps({"providers": ["skillcorner", "pff"]}).encode()
+        body = json.dumps({"providers": ["skillcorner", "gradient-sports"]}).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         event = {"headers": {"authorization": "Bearer own-tok"}}
         result = handler(event, None)
         assert result["statusCode"] == 200
-        assert json.loads(result["body"])["providers"] == ["skillcorner", "pff"]
+        assert json.loads(result["body"])["providers"] == ["skillcorner", "gradient-sports"]
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
@@ -1949,7 +1949,7 @@ class TestGetArtifact(_ResetS3):
         mock_s3 = _mock_s3()
         self._wire_matches(
             mock_s3,
-            {"provider": "pff", "matches": [
+            {"provider": "gradient-sports", "matches": [
                 {"id": "m-001",
                  "artifacts": {"metadata": "metadata.json"},
                  "visibility": "private",
@@ -1959,12 +1959,12 @@ class TestGetArtifact(_ResetS3):
 
         event = {
             "headers": {"authorization": "Bearer own-tok"},
-            "pathParameters": {"provider": "pff", "id": "m-001", "artifact": "metadata"},
+            "pathParameters": {"provider": "gradient-sports", "id": "m-001", "artifact": "metadata"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 302
         # Key resolves under _private/ for private match, no listing.
-        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "pff/_private/m-001/metadata.json"
+        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "gradient-sports/_private/m-001/metadata.json"
         mock_s3.list_objects_v2.assert_not_called()
 
     def test_private_match_public_tier_returns_404(self, monkeypatch) -> None:
@@ -1974,7 +1974,7 @@ class TestGetArtifact(_ResetS3):
         mock_s3 = _mock_s3()
         self._wire_matches(
             mock_s3,
-            {"provider": "pff", "matches": [
+            {"provider": "gradient-sports", "matches": [
                 {"id": "m-001",
                  "artifacts": {"metadata": "metadata.json"},
                  "visibility": "private",
@@ -1984,7 +1984,7 @@ class TestGetArtifact(_ResetS3):
 
         event = {
             "headers": {"authorization": "Bearer pub-tok"},
-            "pathParameters": {"provider": "pff", "id": "m-001", "artifact": "metadata"},
+            "pathParameters": {"provider": "gradient-sports", "id": "m-001", "artifact": "metadata"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 404
@@ -2216,7 +2216,7 @@ class TestListPlayers(_ResetS3):
         shared._get_owner_token.cache_clear()
         monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
 
-    def _wire(self, mock_s3, providers=("sc", "pff"), public_payload=None, private_payload=None):
+    def _wire(self, mock_s3, providers=("sc", "gradient-sports"), public_payload=None, private_payload=None):
         """Wire mock_s3 with a providers.json + per-provider players indexes."""
         import json
         mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
@@ -2301,7 +2301,7 @@ class TestListPlayers(_ResetS3):
         from list_players import handler
         self._setup(monkeypatch)
         mock_s3 = _mock_s3()
-        self._wire(mock_s3, providers=("sc", "pff"))
+        self._wire(mock_s3, providers=("sc", "gradient-sports"))
 
         event = {
             "headers": {"authorization": "Bearer pub-tok"},
@@ -2466,7 +2466,7 @@ class TestGetPlayer(_ResetS3):
         shared._get_owner_token.cache_clear()
         monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
 
-    def _wire(self, mock_s3, providers=("sc", "pff"), public_payload=None, private_payload=None):
+    def _wire(self, mock_s3, providers=("sc", "gradient-sports"), public_payload=None, private_payload=None):
         import json
         mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
         providers_body = json.dumps({"providers": list(providers)}).encode()
@@ -2555,7 +2555,7 @@ class TestGetPlayer(_ResetS3):
         from get_player import handler
         self._setup(monkeypatch)
         mock_s3 = _mock_s3()
-        self._wire(mock_s3, providers=("sc", "pff"))
+        self._wire(mock_s3, providers=("sc", "gradient-sports"))
 
         event = {
             "headers": {"authorization": "Bearer own-tok"},
@@ -2946,7 +2946,7 @@ git commit -m "feat(terraform): add /players and /players/{id} API Gateway route
 - Modify: `pyproject.toml`
 - Create: `src/tests/test_upload_players.py`
 
-The CLI accepts canonical JSON only — a list of `PlayerRecord` objects matching the schema in spec §6.3, or `{"players": [...]}`. CSV is explicitly rejected with a message pointing operators at `scripts/upload_pff_wc2022.py` as the reference adapter (spec §6.5). Cross-tier dedup check runs across BOTH `players.json` files (public and `_private/`) before any write — same id in either file fails the upload (spec §6.5 step 4).
+The CLI accepts canonical JSON only — a list of `PlayerRecord` objects matching the schema in spec §6.3, or `{"players": [...]}`. CSV is explicitly rejected with a message pointing operators at `scripts/upload_gradient_wc2022.py` as the reference adapter (spec §6.5). Cross-tier dedup check runs across BOTH `players.json` files (public and `_private/`) before any write — same id in either file fails the upload (spec §6.5 step 4).
 
 - [ ] **Step 1: Write failing tests**
 
@@ -3000,7 +3000,7 @@ class TestUploadPlayersCSVRejection:
         s3 = _empty_s3()
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             with pytest.raises(ValueError, match="canonical JSON"):
-                upload_players(csv_file, provider="pff", bucket="b", visibility="private")
+                upload_players(csv_file, provider="gradient-sports", bucket="b", visibility="private")
 
     def test_csv_rejection_message_mentions_reference_adapter(self, tmp_path):
         from mock_api.upload_players import upload_players
@@ -3010,8 +3010,8 @@ class TestUploadPlayersCSVRejection:
         csv_file.write_text("id,nickname\n", encoding="utf-8")
 
         with patch("mock_api.upload_players.boto3.client", return_value=_empty_s3()):
-            with pytest.raises(ValueError, match="upload_pff_wc2022"):
-                upload_players(csv_file, provider="pff", bucket="b", visibility="private")
+            with pytest.raises(ValueError, match="upload_gradient_wc2022"):
+                upload_players(csv_file, provider="gradient-sports", bucket="b", visibility="private")
 
 
 class TestUploadPlayersCanonicalJSON:
@@ -3022,12 +3022,12 @@ class TestUploadPlayersCanonicalJSON:
         s3 = _empty_s3()
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             upload_players(
-                json_file, provider="pff", bucket="b", visibility="private",
-                source_name="PFF FC", source_url="https://www.pff.com/", source_licence="Restricted",
+                json_file, provider="gradient-sports", bucket="b", visibility="private",
+                source_name="Gradient Sports", source_url="https://www.gradientsports.com/", source_licence="Restricted",
             )
 
         keys = [c.kwargs.get("Key") for c in s3.put_object.call_args_list]
-        assert "pff/_private/players.json" in keys
+        assert "gradient-sports/_private/players.json" in keys
 
     def test_public_visibility_writes_to_provider_root(self, tmp_path):
         from mock_api.upload_players import upload_players
@@ -3048,14 +3048,14 @@ class TestUploadPlayersCanonicalJSON:
         s3 = _empty_s3()
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             upload_players(
-                json_file, provider="pff", bucket="b", visibility="private",
-                source_name="PFF FC",
+                json_file, provider="gradient-sports", bucket="b", visibility="private",
+                source_name="Gradient Sports",
             )
 
-        put_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "pff/_private/players.json"]
+        put_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "gradient-sports/_private/players.json"]
         assert len(put_calls) == 1
         body = json.loads(put_calls[0].kwargs["Body"].decode("utf-8"))
-        assert body["provider"] == "pff"
+        assert body["provider"] == "gradient-sports"
         assert len(body["players"]) == 2
 
         alpha = next(p for p in body["players"] if p["id"] == "test-001")
@@ -3068,7 +3068,7 @@ class TestUploadPlayersCanonicalJSON:
         assert alpha["visibility"] == "private"
         # updated_at is set by the CLI on every write (spec §6.3)
         assert alpha["updated_at"].endswith("Z")
-        assert alpha["source"]["name"] == "PFF FC"
+        assert alpha["source"]["name"] == "Gradient Sports"
 
     def test_pydantic_validation_rejects_record_missing_a_name(self, tmp_path):
         from mock_api.upload_players import upload_players
@@ -3079,14 +3079,14 @@ class TestUploadPlayersCanonicalJSON:
 
         with patch("mock_api.upload_players.boto3.client", return_value=_empty_s3()):
             with pytest.raises((ValueError, Exception)):
-                upload_players(bad_file, provider="pff", bucket="b", visibility="private")
+                upload_players(bad_file, provider="gradient-sports", bucket="b", visibility="private")
 
     def test_idempotent_reupload_replaces_existing(self, tmp_path):
         from mock_api.upload_players import upload_players
         json_file = _canonical_json_path(tmp_path)
 
         existing_private = {
-            "provider": "pff",
+            "provider": "gradient-sports",
             "players": [
                 {"id": "test-001", "nickname": "Old Name", "visibility": "private", "updated_at": "2025-01-01T00:00:00Z"},
                 {"id": "test-999", "nickname": "Untouched", "visibility": "private", "updated_at": "2025-01-01T00:00:00Z"},
@@ -3096,16 +3096,16 @@ class TestUploadPlayersCanonicalJSON:
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         def get_obj(Bucket, Key):
-            if Key == "pff/_private/players.json":
+            if Key == "gradient-sports/_private/players.json":
                 return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_private).encode()))}
             raise s3.exceptions.NoSuchKey()
 
         s3.get_object.side_effect = get_obj
 
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
-            upload_players(json_file, provider="pff", bucket="b", visibility="private")
+            upload_players(json_file, provider="gradient-sports", bucket="b", visibility="private")
 
-        put_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "pff/_private/players.json"]
+        put_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "gradient-sports/_private/players.json"]
         body = json.loads(put_calls[0].kwargs["Body"].decode("utf-8"))
         ids = sorted(p["id"] for p in body["players"])
         assert ids == ["test-001", "test-002", "test-999"]
@@ -3120,14 +3120,14 @@ class TestUploadPlayersCanonicalJSON:
         json_file = _canonical_json_path(tmp_path)
 
         existing_public = {
-            "provider": "pff",
+            "provider": "gradient-sports",
             "players": [{"id": "test-001", "nickname": "Existing", "visibility": "public", "updated_at": "2025-01-01T00:00:00Z"}],
         }
         s3 = MagicMock()
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         def get_obj(Bucket, Key):
-            if Key == "pff/players.json":
+            if Key == "gradient-sports/players.json":
                 return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_public).encode()))}
             raise s3.exceptions.NoSuchKey()
 
@@ -3135,7 +3135,7 @@ class TestUploadPlayersCanonicalJSON:
 
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             with pytest.raises(ValueError, match="tier"):
-                upload_players(json_file, provider="pff", bucket="b", visibility="private")
+                upload_players(json_file, provider="gradient-sports", bucket="b", visibility="private")
 
     def test_cross_tier_dedup_check_scans_both_files(self, tmp_path):
         """Spec §6.5: cross-tier dedup check reads BOTH players.json files before write."""
@@ -3145,14 +3145,14 @@ class TestUploadPlayersCanonicalJSON:
 
         # test-001 lives in the OTHER tier (public); writing private must fail.
         existing_public = {
-            "provider": "pff",
+            "provider": "gradient-sports",
             "players": [{"id": "test-001", "nickname": "Other Tier", "visibility": "public", "updated_at": "2025-01-01T00:00:00Z"}],
         }
         s3 = MagicMock()
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         def get_obj(Bucket, Key):
-            if Key == "pff/players.json":
+            if Key == "gradient-sports/players.json":
                 return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_public).encode()))}
             raise s3.exceptions.NoSuchKey()
 
@@ -3160,7 +3160,7 @@ class TestUploadPlayersCanonicalJSON:
 
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             with pytest.raises(ValueError, match="cross-tier|other tier"):
-                upload_players(json_file, provider="pff", bucket="b", visibility="private")
+                upload_players(json_file, provider="gradient-sports", bucket="b", visibility="private")
 
     def test_source_license_alias_accepted(self, tmp_path, monkeypatch):
         """Spec §8.2.1: --source-license (American) is a quiet alias for --source-licence (British).
@@ -3225,7 +3225,7 @@ Reads a canonical JSON file (a list of PlayerRecord objects, or
 
 CSV input is explicitly rejected (spec §6.5) — provider-specific shapes must
 be normalised to canonical JSON by a provider-specific adapter; see
-scripts/upload_pff_wc2022.py for a worked example.
+scripts/upload_gradient_wc2022.py for a worked example.
 
 Existing players (by id, within the same tier) are updated in place; new
 players are appended; updated_at is set on every write.
@@ -3260,7 +3260,7 @@ _CSV_REJECTION_MESSAGE = (
     "pining-upload-players accepts canonical JSON only (a list of PlayerRecord objects, "
     "or {\"players\": [...]}).\n"
     "CSV input is not supported by this CLI — provider-specific shapes must be normalised "
-    "to canonical JSON by a provider-specific adapter. See scripts/upload_pff_wc2022.py for "
+    "to canonical JSON by a provider-specific adapter. See scripts/upload_gradient_wc2022.py for "
     "a worked example."
 )
 
@@ -3381,7 +3381,7 @@ def main() -> None:
         description="Upload a canonical-JSON player catalogue to the mock provider API's S3 bucket"
     )
     parser.add_argument("input_file", type=Path, help="Canonical JSON file with player records")
-    parser.add_argument("--provider", required=True, help="Provider name (e.g., pff)")
+    parser.add_argument("--provider", required=True, help="Provider name (e.g., gradient-sports)")
     parser.add_argument("--bucket", required=True, help="S3 bucket name")
     parser.add_argument("--visibility", default="public", choices=["public", "private"])
     parser.add_argument("--source-name", default=None)
@@ -3726,21 +3726,21 @@ git commit -m "feat(terraform): add CloudTrail data events on data bucket with a
 
 ---
 
-# Phase 6 — PFF Orchestrator and Bulk Load
+# Phase 6 — Gradient Sports Orchestrator and Bulk Load
 
-### Task 18: Write `scripts/upload_pff_wc2022.py`
+### Task 18: Write `scripts/upload_gradient_wc2022.py`
 
 **Files:**
-- Create: `scripts/upload_pff_wc2022.py`
+- Create: `scripts/upload_gradient_wc2022.py`
 
-Goal: idempotent one-shot script that reads the PFF source folder, reshapes per-match files, calls `upload_game` for each of the 64 matches, and `upload_players` for the player catalogue.
+Goal: idempotent one-shot script that reads the Gradient Sports source folder, reshapes per-match files, calls `upload_game` for each of the 64 matches, and `upload_players` for the player catalogue.
 
 - [ ] **Step 1: Write the script**
 
-Create `scripts/upload_pff_wc2022.py`:
+Create `scripts/upload_gradient_wc2022.py`:
 
 ```python
-"""Upload PFF FIFA World Cup 2022 to the mock provider API as private-tier data.
+"""Upload Gradient Sports FIFA World Cup 2022 to the mock provider API as private-tier data.
 
 Reshapes the source bundle into per-match staging directories, then calls
 the pining-upload primitives. For players, normalises players.csv into a
@@ -3765,7 +3765,7 @@ Source layout (input):
     ├── Tracking Data/{id}.jsonl.bz2
     ├── competitions.csv          # not uploaded — directory data covered by /matches
     ├── players.csv               # normalised to canonical JSON, then uploaded as /players catalogue
-    └── PFF FC Change Log.docx    # not uploaded
+    └── Gradient Sports Change Log.docx    # not uploaded
 """
 
 from __future__ import annotations
@@ -3785,14 +3785,14 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 from mock_api.upload import upload_game  # noqa: E402
 from mock_api.upload_players import upload_players  # noqa: E402
 
-PROVIDER = "pff"
-SOURCE_NAME = "PFF FC"
-SOURCE_URL = "https://www.pff.com/"
+PROVIDER = "gradient-sports"
+SOURCE_NAME = "Gradient Sports"
+SOURCE_URL = "https://www.gradientsports.com/"
 SOURCE_LICENCE = "Restricted; redistribution not permitted pending licence clarification"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Bulk-upload PFF World Cup 2022 to the mock provider API")
+    parser = argparse.ArgumentParser(description="Bulk-upload Gradient Sports World Cup 2022 to the mock provider API")
     parser.add_argument("source_dir", type=Path, help="Path to the 'FIFA World Cup 2022' source folder")
     parser.add_argument("--bucket", required=True, help="S3 bucket name")
     parser.add_argument("--limit", type=int, default=None, help="Limit number of matches uploaded (smoke test)")
@@ -3816,10 +3816,10 @@ def main() -> None:
         if not players_csv.is_file():
             print(f"WARN: {players_csv} not found, skipping player catalogue upload")
         else:
-            with tempfile.TemporaryDirectory(prefix="pff-players-") as tmp:
+            with tempfile.TemporaryDirectory(prefix="gradient-players-") as tmp:
                 canonical_json = Path(tmp) / "players.json"
                 count = _normalise_players_csv_to_canonical(players_csv, canonical_json)
-                print(f"Normalised {count} PFF player(s) to canonical JSON at {canonical_json}")
+                print(f"Normalised {count} Gradient Sports player(s) to canonical JSON at {canonical_json}")
                 print(f"Uploading player catalogue to s3://{args.bucket}/{PROVIDER}/_private/players.json")
                 upload_players(
                     input_file=canonical_json,
@@ -3835,9 +3835,9 @@ def main() -> None:
 
 
 def _normalise_players_csv_to_canonical(csv_path: Path, out_path: Path) -> int:
-    """Read PFF's players.csv and write a canonical-JSON file matching PlayerRecord.
+    """Read Gradient Sports' players.csv and write a canonical-JSON file matching PlayerRecord.
 
-    PFF columns: dob, firstName, height, id, lastName, nickname, positionGroupType.
+    Gradient Sports columns: dob, firstName, height, id, lastName, nickname, positionGroupType.
     Maps directly to canonical fields with no semantic translation; type-coerce
     `height` to float. visibility/updated_at/source are added by the upload CLI.
     """
@@ -3883,14 +3883,14 @@ def _upload_one_match(source_dir: Path, match_id: str, bucket: str) -> None:
 
     metadata_obj = json.loads(metadata_path.read_text(encoding="utf-8"))
     if isinstance(metadata_obj, list):
-        # PFF wraps the metadata in a single-element list
+        # Gradient Sports wraps the metadata in a single-element list
         metadata_obj = metadata_obj[0] if metadata_obj else {}
 
     date = metadata_obj.get("date", "").split("T", 1)[0]
     home = (metadata_obj.get("homeTeam") or {}).get("name", "")
     away = (metadata_obj.get("awayTeam") or {}).get("name", "")
 
-    with tempfile.TemporaryDirectory(prefix=f"pff-{match_id}-") as tmp:
+    with tempfile.TemporaryDirectory(prefix=f"gradient-{match_id}-") as tmp:
         staging = Path(tmp)
         shutil.copy(metadata_path, staging / "metadata.json")
         shutil.copy(events_path,   staging / "events.json")
@@ -3920,7 +3920,7 @@ if __name__ == "__main__":
 - [ ] **Step 2: Sanity-check the script with `--help`**
 
 ```bash
-python scripts/upload_pff_wc2022.py --help
+python scripts/upload_gradient_wc2022.py --help
 ```
 
 Expected: usage printed, no errors.
@@ -3929,18 +3929,18 @@ Expected: usage printed, no errors.
 
 Without bucket access, just exercise the discovery:
 
-Set `PFF_SOURCE_DIR` to the local path of the unpacked `FIFA World Cup 2022` source folder before running. Path stays out of git.
+Set `GRADIENT_SOURCE_DIR` to the local path of the unpacked `FIFA World Cup 2022` source folder before running. Path stays out of git.
 
 ```bash
 # operator sets this in their local shell, not committed:
-#   export PFF_SOURCE_DIR="/path/to/FIFA World Cup 2022"
+#   export GRADIENT_SOURCE_DIR="/path/to/FIFA World Cup 2022"
 
 python -c "
 import os, sys
 sys.path.insert(0, 'scripts')
-import upload_pff_wc2022
+import upload_gradient_wc2022
 from pathlib import Path
-ids = upload_pff_wc2022._discover_match_ids(Path(os.environ['PFF_SOURCE_DIR']))
+ids = upload_gradient_wc2022._discover_match_ids(Path(os.environ['GRADIENT_SOURCE_DIR']))
 print(f'Found {len(ids)} match(es)')
 print('First 3:', ids[:3])
 "
@@ -3951,36 +3951,36 @@ Expected: `Found 64 match(es)` and three numeric IDs.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add scripts/upload_pff_wc2022.py
-git commit -m "feat(scripts): add upload_pff_wc2022 orchestrator for bulk PFF private-tier load"
+git add scripts/upload_gradient_wc2022.py
+git commit -m "feat(scripts): add upload_gradient_wc2022 orchestrator for bulk Gradient Sports private-tier load"
 ```
 
 ---
 
-### Task 19: Smoke-test PFF upload with one match
+### Task 19: Smoke-test Gradient Sports upload with one match
 
 **Files:** none — operational.
 
 **Prerequisite:** Phase 1–5 deployed; SSM owner token set. No licence gate — spec §8.3 explains why private-tier loads are gate-free under the single-owner threat model.
 
-Operator must have `PFF_SOURCE_DIR` set to the local path of the unpacked source folder. The path is intentionally NOT committed to the repo.
+Operator must have `GRADIENT_SOURCE_DIR` set to the local path of the unpacked source folder. The path is intentionally NOT committed to the repo.
 
 - [ ] **Step 1: Upload a single match end-to-end**
 
 ```bash
 BUCKET=$(cd terraform/environments/dev && terraform output -raw bucket_name)
-python scripts/upload_pff_wc2022.py \
-  "$PFF_SOURCE_DIR" \
+python scripts/upload_gradient_wc2022.py \
+  "$GRADIENT_SOURCE_DIR" \
   --bucket "$BUCKET" \
   --limit 1 \
   --skip-players
 ```
 
-Expected: one match uploads successfully; matches.json updates with object-form `artifacts`, `updated_at`, and `visibility: "private"`; providers.json gains `pff`. The `--limit 1` flag picks the first match in alphabetical order from the source folder; the operator notes its ID for the next steps and exports it as `PFF_SMOKE_MATCH_ID`:
+Expected: one match uploads successfully; matches.json updates with object-form `artifacts`, `updated_at`, and `visibility: "private"`; providers.json gains `gradient-sports`. The `--limit 1` flag picks the first match in alphabetical order from the source folder; the operator notes its ID for the next steps and exports it as `GRADIENT_SMOKE_MATCH_ID`:
 
 ```bash
 # Operator captures the uploaded match ID for downstream curl steps. Not committed.
-export PFF_SMOKE_MATCH_ID=$(ls "$PFF_SOURCE_DIR/Metadata" | head -1 | sed 's/\.json$//')
+export GRADIENT_SMOKE_MATCH_ID=$(ls "$GRADIENT_SOURCE_DIR/Metadata" | head -1 | sed 's/\.json$//')
 ```
 
 - [ ] **Step 2: Verify public token gets 404 on private match**
@@ -3988,51 +3988,51 @@ export PFF_SMOKE_MATCH_ID=$(ls "$PFF_SOURCE_DIR/Metadata" | head -1 | sed 's/\.j
 ```bash
 API=$(cd terraform/environments/dev && terraform output -raw api_url)
 PUB="$PUB_TOKEN"
-curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/pff/matches/$PFF_SMOKE_MATCH_ID/metadata"
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/gradient-sports/matches/$GRADIENT_SMOKE_MATCH_ID/metadata"
 ```
 
 Expected: `404`.
 
-- [ ] **Step 3: Verify public token sees empty matches list for pff**
+- [ ] **Step 3: Verify public token sees empty matches list for gradient-sports**
 
 ```bash
-curl -s -H "Authorization: Bearer $PUB" "$API/pff/matches" | python -m json.tool
+curl -s -H "Authorization: Bearer $PUB" "$API/gradient-sports/matches" | python -m json.tool
 ```
 
-Expected: `{"provider": "pff", "matches": []}`.
+Expected: `{"provider": "gradient-sports", "matches": []}`.
 
-- [ ] **Step 4: Verify public token still sees pff in the providers list (spec §4.2)**
+- [ ] **Step 4: Verify public token still sees gradient-sports in the providers list (spec §4.2)**
 
 ```bash
 curl -s -H "Authorization: Bearer $PUB" "$API/providers" | python -m json.tool
 ```
 
-Expected: `pff` is in the providers list — visible to public tier (existence is not the secret).
+Expected: `gradient-sports` is in the providers list — visible to public tier (existence is not the secret).
 
 - [ ] **Step 5: Verify owner token gets 302 + can fetch the metadata**
 
 ```bash
 OWNER=$(aws ssm get-parameter --name "/pining-for-the-data/api_token_owner" --with-decryption --query 'Parameter.Value' --output text)
-curl -s -L -H "Authorization: Bearer $OWNER" "$API/pff/matches/$PFF_SMOKE_MATCH_ID/metadata" | python -m json.tool | head -5
+curl -s -L -H "Authorization: Bearer $OWNER" "$API/gradient-sports/matches/$GRADIENT_SMOKE_MATCH_ID/metadata" | python -m json.tool | head -5
 ```
 
-Expected: 302 followed transparently to the presigned URL, then the metadata JSON prints. The body content is not asserted in this smoke test (any specific team/player names would themselves be PFF mapping data).
+Expected: 302 followed transparently to the presigned URL, then the metadata JSON prints. The body content is not asserted in this smoke test (any specific team/player names would themselves be Gradient Sports mapping data).
 
 - [ ] **Step 6: Verify owner token sees the match in the list with object-form artifacts**
 
 ```bash
-curl -s -H "Authorization: Bearer $OWNER" "$API/pff/matches" | python -m json.tool
+curl -s -H "Authorization: Bearer $OWNER" "$API/gradient-sports/matches" | python -m json.tool
 ```
 
-Expected: 1 match entry with `"id": "$PFF_SMOKE_MATCH_ID"`, `"visibility": "private"`, and `"artifacts"` as an object like `{"metadata": "metadata.json", "events": "events.json", "roster": "roster.json", "tracking": "tracking.jsonl.bz2"}`. Also has `"updated_at"` ending in `Z`.
+Expected: 1 match entry with `"id": "$GRADIENT_SMOKE_MATCH_ID"`, `"visibility": "private"`, and `"artifacts"` as an object like `{"metadata": "metadata.json", "events": "events.json", "roster": "roster.json", "tracking": "tracking.jsonl.bz2"}`. Also has `"updated_at"` ending in `Z`.
 
 - [ ] **Step 7: No commit (operational task)**
 
 ---
 
-### Task 20: Bulk PFF load and final verification
+### Task 20: Bulk Gradient Sports load and final verification
 
-**Files:** none — operational. (Task 21 below introduces the `verify_pff_load.py` script invoked at Step 8.)
+**Files:** none — operational. (Task 21 below introduces the `verify_gradient_load.py` script invoked at Step 8.)
 
 **Prerequisite:** Phase 1–5 deployed; SSM owner token set. No licence gate (spec §8.3).
 
@@ -4040,8 +4040,8 @@ Expected: 1 match entry with `"id": "$PFF_SMOKE_MATCH_ID"`, `"visibility": "priv
 
 ```bash
 BUCKET=$(cd terraform/environments/dev && terraform output -raw bucket_name)
-python scripts/upload_pff_wc2022.py \
-  "$PFF_SOURCE_DIR" \
+python scripts/upload_gradient_wc2022.py \
+  "$GRADIENT_SOURCE_DIR" \
   --bucket "$BUCKET"
 ```
 
@@ -4052,7 +4052,7 @@ Expected: 64 matches uploaded, players catalogue uploaded (canonical-JSON normal
 ```bash
 API=$(cd terraform/environments/dev && terraform output -raw api_url)
 OWNER=$(aws ssm get-parameter --name "/pining-for-the-data/api_token_owner" --with-decryption --query 'Parameter.Value' --output text)
-curl -s -H "Authorization: Bearer $OWNER" "$API/pff/matches" | python -c "import sys, json; print(len(json.load(sys.stdin)['matches']))"
+curl -s -H "Authorization: Bearer $OWNER" "$API/gradient-sports/matches" | python -c "import sys, json; print(len(json.load(sys.stdin)['matches']))"
 ```
 
 Expected: `67`.
@@ -4060,30 +4060,30 @@ Expected: `67`.
 - [ ] **Step 3: Verify owner token sees the player catalogue**
 
 ```bash
-curl -s -H "Authorization: Bearer $OWNER" "$API/pff/players" | python -c "import sys, json; print(len(json.load(sys.stdin)['players']))"
+curl -s -H "Authorization: Bearer $OWNER" "$API/gradient-sports/players" | python -c "import sys, json; print(len(json.load(sys.stdin)['players']))"
 ```
 
 Expected: `2322`.
 
-- [ ] **Step 4: Verify public token still sees zero matches and zero players for pff**
+- [ ] **Step 4: Verify public token still sees zero matches and zero players for gradient-sports**
 
 ```bash
 PUB="$PUB_TOKEN"
-curl -s -H "Authorization: Bearer $PUB" "$API/pff/matches" | python -c "import sys, json; print(len(json.load(sys.stdin)['matches']))"
-curl -s -H "Authorization: Bearer $PUB" "$API/pff/players" | python -c "import sys, json; print(len(json.load(sys.stdin)['players']))"
+curl -s -H "Authorization: Bearer $PUB" "$API/gradient-sports/matches" | python -c "import sys, json; print(len(json.load(sys.stdin)['matches']))"
+curl -s -H "Authorization: Bearer $PUB" "$API/gradient-sports/players" | python -c "import sys, json; print(len(json.load(sys.stdin)['players']))"
 ```
 
 Expected: `0` and `0`.
 
 - [ ] **Step 5: Spot-check an individual player by ID**
 
-The operator picks a player ID from the loaded catalogue at runtime — do NOT hardcode a PFF identifier in committed docs (see memory `feedback_no_local_paths_in_committed_docs.md`; the same hygiene applies to provider identifiers).
+The operator picks a player ID from the loaded catalogue at runtime — do NOT hardcode a Gradient Sports identifier in committed docs (see memory `feedback_no_local_paths_in_committed_docs.md`; the same hygiene applies to provider identifiers).
 
 ```bash
 # Operator picks an ID from the loaded catalogue:
-SAMPLE_PLAYER_ID=$(curl -s -H "Authorization: Bearer $OWNER" "$API/pff/players" | \
+SAMPLE_PLAYER_ID=$(curl -s -H "Authorization: Bearer $OWNER" "$API/gradient-sports/players" | \
   python -c "import sys, json; print(json.load(sys.stdin)['players'][0]['id'])")
-curl -s -H "Authorization: Bearer $OWNER" "$API/pff/players/$SAMPLE_PLAYER_ID" | python -m json.tool
+curl -s -H "Authorization: Bearer $OWNER" "$API/gradient-sports/players/$SAMPLE_PLAYER_ID" | python -m json.tool
 ```
 
 Expected: a player record with `firstName`, `lastName`, `nickname`, and `"visibility": "private"`.
@@ -4091,7 +4091,7 @@ Expected: a player record with `firstName`, `lastName`, `nickname`, and `"visibi
 - [ ] **Step 6: Verify public token gets 404 on the same player ID**
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/pff/players/$SAMPLE_PLAYER_ID"
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/gradient-sports/players/$SAMPLE_PLAYER_ID"
 ```
 
 Expected: `404`.
@@ -4106,43 +4106,43 @@ aws s3 ls "s3://$AUDIT_BUCKET/AWSLogs/" --recursive | tail -5
 
 Expected: log files exist (typically `.json.gz`), with one or more from the last few minutes covering the recent S3 GetObject calls. Per spec §7.5, `/matches.json` and `/players.json` reads are also logged (only `/providers.json` is excluded), so these recent enumeration calls should be visible.
 
-- [ ] **Step 8: Run automated post-load verification (`scripts/verify_pff_load.py`)**
+- [ ] **Step 8: Run automated post-load verification (`scripts/verify_gradient_load.py`)**
 
 ```bash
-python scripts/verify_pff_load.py \
+python scripts/verify_gradient_load.py \
   --api "$API" \
   --owner-token "$OWNER" \
   --public-token "$PUB"
 ```
 
-Expected: exits 0 with a summary like `OK: 64 matches, 2322 players; 5/5 artifact spot-checks pass; 3/3 player spot-checks pass; public-tier sees 0 matches, 0 players, pff in providers list`. Exits non-zero on ANY post-condition failure (count mismatch, visibility leak, artifact 404, player record missing).
+Expected: exits 0 with a summary like `OK: 64 matches, 2322 players; 5/5 artifact spot-checks pass; 3/3 player spot-checks pass; public-tier sees 0 matches, 0 players, gradient-sports in providers list`. Exits non-zero on ANY post-condition failure (count mismatch, visibility leak, artifact 404, player record missing).
 
 - [ ] **Step 9: No commit (operational task)**
 
 ---
 
-### Task 21: Write `scripts/verify_pff_load.py`
+### Task 21: Write `scripts/verify_gradient_load.py`
 
 **Files:**
-- Create: `scripts/verify_pff_load.py`
+- Create: `scripts/verify_gradient_load.py`
 
-Replaces the manual `curl` smoke tests with an automated post-condition checker. Spec §8.3.1. The script is idempotent and side-effect-free (only HTTP GETs); it should be runnable any time after the PFF load to detect regressions.
+Replaces the manual `curl` smoke tests with an automated post-condition checker. Spec §8.3.1. The script is idempotent and side-effect-free (only HTTP GETs); it should be runnable any time after the Gradient Sports load to detect regressions.
 
 - [ ] **Step 1: Write the script**
 
-Create `scripts/verify_pff_load.py`:
+Create `scripts/verify_gradient_load.py`:
 
 ```python
-"""Post-load verification for the PFF World Cup 2022 dataset.
+"""Post-load verification for the Gradient Sports World Cup 2022 dataset.
 
 Replaces manual curl smoke tests with an automated check that runs after
-scripts/upload_pff_wc2022.py and exits non-zero on any post-condition failure.
+scripts/upload_gradient_wc2022.py and exits non-zero on any post-condition failure.
 
 Checks (spec §8.3.1):
-  - owner-tier /pff/matches returns exactly EXPECTED_MATCH_COUNT entries
-  - owner-tier /pff/players returns exactly EXPECTED_PLAYER_COUNT entries
-  - public-tier /pff/matches and /pff/players return zero entries
-  - public-tier /providers includes 'pff' (existence is not the secret)
+  - owner-tier /gradient-sports/matches returns exactly EXPECTED_MATCH_COUNT entries
+  - owner-tier /gradient-sports/players returns exactly EXPECTED_PLAYER_COUNT entries
+  - public-tier /gradient-sports/matches and /gradient-sports/players return zero entries
+  - public-tier /providers includes 'gradient-sports' (existence is not the secret)
   - 5 random match × 4 artifact owner-tier fetches return 200 + non-empty body
   - 3 specific known-good player IDs return 200 with expected fields
 """
@@ -4200,7 +4200,7 @@ def _get_status(api: str, path: str, token: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify the PFF WC2022 dataset is loaded correctly")
+    parser = argparse.ArgumentParser(description="Verify the Gradient Sports WC2022 dataset is loaded correctly")
     parser.add_argument("--api", required=True, help="API base URL (no trailing slash)")
     parser.add_argument("--owner-token", required=True)
     parser.add_argument("--public-token", required=True)
@@ -4211,55 +4211,55 @@ def main() -> int:
 
     # 1. Owner-tier match count
     try:
-        body, _ = _get_json(args.api, "/pff/matches", args.owner_token)
+        body, _ = _get_json(args.api, "/gradient-sports/matches", args.owner_token)
         n = len(body.get("matches", []))
         if n != EXPECTED_MATCH_COUNT:
-            failures.append(f"owner /pff/matches: expected {EXPECTED_MATCH_COUNT}, got {n}")
+            failures.append(f"owner /gradient-sports/matches: expected {EXPECTED_MATCH_COUNT}, got {n}")
         else:
-            print(f"OK: owner /pff/matches = {n}")
+            print(f"OK: owner /gradient-sports/matches = {n}")
     except Exception as e:
-        failures.append(f"owner /pff/matches: request failed: {e}")
+        failures.append(f"owner /gradient-sports/matches: request failed: {e}")
         body = {"matches": []}
 
     matches = body.get("matches", [])
 
     # 2. Owner-tier player count
     try:
-        pbody, _ = _get_json(args.api, "/pff/players", args.owner_token)
+        pbody, _ = _get_json(args.api, "/gradient-sports/players", args.owner_token)
         np_ = len(pbody.get("players", []))
         if np_ != EXPECTED_PLAYER_COUNT:
-            failures.append(f"owner /pff/players: expected {EXPECTED_PLAYER_COUNT}, got {np_}")
+            failures.append(f"owner /gradient-sports/players: expected {EXPECTED_PLAYER_COUNT}, got {np_}")
         else:
-            print(f"OK: owner /pff/players = {np_}")
+            print(f"OK: owner /gradient-sports/players = {np_}")
     except Exception as e:
-        failures.append(f"owner /pff/players: request failed: {e}")
+        failures.append(f"owner /gradient-sports/players: request failed: {e}")
 
     # 3. Public-tier visibility leak checks
     try:
-        body, _ = _get_json(args.api, "/pff/matches", args.public_token)
+        body, _ = _get_json(args.api, "/gradient-sports/matches", args.public_token)
         if body.get("matches"):
-            failures.append(f"VISIBILITY LEAK: public /pff/matches returned {len(body['matches'])} entries (expected 0)")
+            failures.append(f"VISIBILITY LEAK: public /gradient-sports/matches returned {len(body['matches'])} entries (expected 0)")
         else:
-            print("OK: public /pff/matches = 0")
+            print("OK: public /gradient-sports/matches = 0")
     except Exception as e:
-        failures.append(f"public /pff/matches: request failed: {e}")
+        failures.append(f"public /gradient-sports/matches: request failed: {e}")
 
     try:
-        body, _ = _get_json(args.api, "/pff/players", args.public_token)
+        body, _ = _get_json(args.api, "/gradient-sports/players", args.public_token)
         if body.get("players"):
-            failures.append(f"VISIBILITY LEAK: public /pff/players returned {len(body['players'])} entries (expected 0)")
+            failures.append(f"VISIBILITY LEAK: public /gradient-sports/players returned {len(body['players'])} entries (expected 0)")
         else:
-            print("OK: public /pff/players = 0")
+            print("OK: public /gradient-sports/players = 0")
     except Exception as e:
-        failures.append(f"public /pff/players: request failed: {e}")
+        failures.append(f"public /gradient-sports/players: request failed: {e}")
 
-    # 4. public /providers MUST include pff (existence is not the secret; spec §4.2)
+    # 4. public /providers MUST include gradient-sports (existence is not the secret; spec §4.2)
     try:
         body, _ = _get_json(args.api, "/providers", args.public_token)
-        if "pff" not in body.get("providers", []):
-            failures.append("public /providers: 'pff' missing — spec §4.2 says public tier sees all providers")
+        if "gradient-sports" not in body.get("providers", []):
+            failures.append("public /providers: 'gradient-sports' missing — spec §4.2 says public tier sees all providers")
         else:
-            print("OK: public /providers contains 'pff'")
+            print("OK: public /providers contains 'gradient-sports'")
     except Exception as e:
         failures.append(f"public /providers: request failed: {e}")
 
@@ -4273,7 +4273,7 @@ def main() -> int:
         for artifact in ARTIFACTS_PER_MATCH:
             spot_total += 1
             try:
-                status, size = _follow_redirect(args.api, f"/pff/matches/{match_id}/{artifact}", args.owner_token)
+                status, size = _follow_redirect(args.api, f"/gradient-sports/matches/{match_id}/{artifact}", args.owner_token)
                 if status == 200 and size > 0:
                     spot_pass += 1
                 else:
@@ -4287,19 +4287,19 @@ def main() -> int:
     # has an id matching the path-param regex, and at least one of nickname /
     # firstName+lastName per spec §6.3.
     try:
-        all_players_body, _ = _get_json(args.api, "/pff/players", args.owner_token)
+        all_players_body, _ = _get_json(args.api, "/gradient-sports/players", args.owner_token)
         all_players = all_players_body.get("players", [])
     except Exception as e:
-        failures.append(f"owner /pff/players for spot-check: failed: {e}")
+        failures.append(f"owner /gradient-sports/players for spot-check: failed: {e}")
         all_players = []
 
     sample_players = rng.sample(all_players, min(PLAYER_SPOT_CHECK_SAMPLE_SIZE, len(all_players)))
     player_pass = 0
     for p in sample_players:
         pid = p.get("id", "")
-        # Round-trip via /pff/players/{id} to confirm individual lookup works.
+        # Round-trip via /gradient-sports/players/{id} to confirm individual lookup works.
         try:
-            body, _ = _get_json(args.api, f"/pff/players/{pid}", args.owner_token)
+            body, _ = _get_json(args.api, f"/gradient-sports/players/{pid}", args.owner_token)
             shape_ok = (
                 isinstance(body.get("id"), str)
                 and (body.get("nickname") or (body.get("firstName") and body.get("lastName")))
@@ -4317,11 +4317,11 @@ def main() -> int:
     if matches:
         any_match = matches[0]["id"]
         any_artifact = next(iter(matches[0].get("artifacts", {}).keys()), "metadata")
-        status = _get_status(args.api, f"/pff/matches/{any_match}/{any_artifact}", args.public_token)
+        status = _get_status(args.api, f"/gradient-sports/matches/{any_match}/{any_artifact}", args.public_token)
         if status != 404:
-            failures.append(f"public /pff/matches/{any_match}/{any_artifact}: expected 404, got {status}")
+            failures.append(f"public /gradient-sports/matches/{any_match}/{any_artifact}: expected 404, got {status}")
         else:
-            print(f"OK: public 404 on private artifact /pff/matches/{any_match}/{any_artifact}")
+            print(f"OK: public 404 on private artifact /gradient-sports/matches/{any_match}/{any_artifact}")
 
     if failures:
         print("\nFAILURES:")
@@ -4339,7 +4339,7 @@ if __name__ == "__main__":
 - [ ] **Step 2: Smoke-check the script with `--help`**
 
 ```bash
-python scripts/verify_pff_load.py --help
+python scripts/verify_gradient_load.py --help
 ```
 
 Expected: usage printed, no errors.
@@ -4347,8 +4347,8 @@ Expected: usage printed, no errors.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add scripts/verify_pff_load.py
-git commit -m "feat(scripts): add verify_pff_load post-load post-condition checker"
+git add scripts/verify_gradient_load.py
+git commit -m "feat(scripts): add verify_gradient_load post-load post-condition checker"
 ```
 
 ---
@@ -4433,15 +4433,15 @@ Expected: the original token is restored across all five Lambdas; the rehearsal 
 ## Self-review notes
 
 - All spec sections (3 auth incl. §3.5 onboarding/rotation, 4 visibility, 5 S3 layout, 6 reference resources incl. §6.6 schemas, 7 audit logging, 8 upload tooling incl. §8.2.1 spelling and §8.3 licence gate, 9 consumer contract, 10 migration, 11 future extensions incl. §11.4 re-tiering and §11.6 dual-validity sketch, 12 tests, 13 resolved questions) have at least one task. The consumer contract (§9) is implicit — the API change is what consumers consume; no work in this repo. Migration (§10) is exercised by Tasks 3, 6, 6.5, 16, 19, 20 (operational deploy + smoke + licence-gated bulk load).
-- No placeholders. Every step has either exact code, an exact command, or both. The one operator-supplied input (PFF source folder) is referenced via `$PFF_SOURCE_DIR` env var; local paths are deliberately NOT committed (per memory `feedback_no_local_paths_in_committed_docs.md`).
+- No placeholders. Every step has either exact code, an exact command, or both. The one operator-supplied input (Gradient Sports source folder) is referenced via `$GRADIENT_SOURCE_DIR` env var; local paths are deliberately NOT committed (per memory `feedback_no_local_paths_in_committed_docs.md`).
 - Type consistency: `Tier` enum used consistently across handlers. `validate_token` signature is `Tier | dict`; duplicate-token misconfiguration classifies as `Tier.PUBLIC` (fail closed; spec §3.2). `visibility` is consistently `"public" | "private"` (string, not enum) at the upload-tool boundary because it crosses argparse — internal Lambda code uses the string but Pydantic models pin the literal. `artifacts` is `dict[str, str]` everywhere (spec §4.1) — array form is gone end-to-end.
 - Schema discipline: `MatchEntry` and `PlayerRecord` Pydantic models are the single source of truth (Phase 2.5, Task 6.5); `schemas/{matches,players}.schema.json` are generated from them and drift-tested in CI. Both upload CLIs validate against the models before any S3 call. Adding fields requires only model edit + `python scripts/regenerate_schemas.py`.
 - Spelling consistency: British `--source-licence` is canonical on both `pining-upload` and `pining-upload-players`; American `--source-license` is a quiet alias on both (spec §8.2.1). The internal JSON field is always `licence`. The pre-revision inconsistency between the two CLIs is resolved.
 - CloudTrail filter discipline: `not_ends_with` excludes only `/providers.json` (spec §7.5). The earlier sketch's broader exclusion (also `/matches.json` and `/players.json`) is corrected to keep enumeration-vector reads logged.
-- Operational gating: Phase 6 (bulk PFF load) has NO runtime licence gate. Spec §8.3 documents the rationale — under the single-owner threat model, a private-tier load is data movement within the operator's own systems (their copy of the data into their own private bucket served back to their own owner-token holder), not redistribution to a third party. If a public-tier upload mode is ever added to `scripts/upload_pff_wc2022.py`, that path will need its own licence-clarification gate.
-- Verify script (`scripts/verify_pff_load.py`, Task 21) replaces the manual `curl` smoke tests with an automated post-condition checker. It's HTTP-only, idempotent, and re-runnable any time after the load. Player spot-checks are content-agnostic — sample N records from the live response and validate canonical-shape conformance (no hardcoded provider-specific id→name tuples; the licensed mapping is exactly what the §8.3 redistribution gate exists to protect, including in committed test fixtures).
+- Operational gating: Phase 6 (bulk Gradient Sports load) has NO runtime licence gate. Spec §8.3 documents the rationale — under the single-owner threat model, a private-tier load is data movement within the operator's own systems (their copy of the data into their own private bucket served back to their own owner-token holder), not redistribution to a third party. If a public-tier upload mode is ever added to `scripts/upload_gradient_wc2022.py`, that path will need its own licence-clarification gate.
+- Verify script (`scripts/verify_gradient_load.py`, Task 21) replaces the manual `curl` smoke tests with an automated post-condition checker. It's HTTP-only, idempotent, and re-runnable any time after the load. Player spot-checks are content-agnostic — sample N records from the live response and validate canonical-shape conformance (no hardcoded provider-specific id→name tuples; the licensed mapping is exactly what the §8.3 redistribution gate exists to protect, including in committed test fixtures).
 - Rotation runbook (Task 22) is exercised end-to-end as a rehearsal. The `LAST_ROTATION` env var bumps all five Lambdas in a single `terraform apply` (spec §3.5: split-brain risk if only some are bumped). v1 has no dual-validity — consumers MUST implement 401 retry during the rotation window, per spec §3.5; the future zero-downtime upgrade path is sketched in spec §11.6.
-- Sensitive-content hygiene: no operator-local paths (uses `$PFF_SOURCE_DIR`), no hardcoded provider-internal identifiers in committed test fixtures or smoke commands (synthetic `m-001`/`test-001`/`test-002` for tests; `$PFF_SMOKE_MATCH_ID` for operational smoke; sample-from-live-response in verify script). The public token literal `test-token-pining-for-the-data` is parameterised as `$PUB_TOKEN` even though it's already documented in README — keeps the plan portable across rotations.
+- Sensitive-content hygiene: no operator-local paths (uses `$GRADIENT_SOURCE_DIR`), no hardcoded provider-internal identifiers in committed test fixtures or smoke commands (synthetic `m-001`/`test-001`/`test-002` for tests; `$GRADIENT_SMOKE_MATCH_ID` for operational smoke; sample-from-live-response in verify script). The public token literal `test-token-pining-for-the-data` is parameterised as `$PUB_TOKEN` even though it's already documented in README — keeps the plan portable across rotations.
 - Whitelist enforcement on artifact keys: `MatchEntry` Pydantic model has a `model_validator` asserting every artifact key matches the path-param regex, so the upload tool cannot land entries the API would refuse to serve (closes the path-traversal-style write that the API would block at request time but the upload tool wouldn't catch).
 
 ---

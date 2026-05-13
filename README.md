@@ -190,7 +190,7 @@ pining-for-the-data/
 ├── name_pools/              # JSON name lists (fictional first/last names, cities)
 ├── rosters/                 # Generated de-identified rosters per game
 ├── schemas/                 # Published JSON Schemas for matches.json + players.json
-├── scripts/                 # One-shot ops scripts (regenerate_schemas, upload_pff_wc2022, verify_pff_load)
+├── scripts/                 # One-shot ops scripts (regenerate_schemas, upload_gradient_wc2022, verify_gradient_load)
 ├── terraform/               # AWS infrastructure (S3 + API Gateway + Lambda + SSM + KMS + CloudTrail)
 ├── assets/                  # Repo logo and images
 ├── docs/

@@ -28,7 +28,7 @@ The path-param validator rejects any path component starting with `_` (regex `^[
 - Backwards-compatible with existing public content (no path change for current SkillCorner data).
 
 **Negative**
-- Reserves a path segment globally; provider IDs and match IDs starting with `_` are forbidden (no real provider does this; PFF and SkillCorner both qualify).
+- Reserves a path segment globally; provider IDs and match IDs starting with `_` are forbidden (no real provider does this; Gradient Sports and SkillCorner both qualify).
 - Two physical files for the players index instead of one — slightly more upload-tool complexity.
 
 **Reversal cost**: medium. Removing the convention requires moving objects and rewriting indexes; the path-param validator change is trivial but data migration is operationally significant.

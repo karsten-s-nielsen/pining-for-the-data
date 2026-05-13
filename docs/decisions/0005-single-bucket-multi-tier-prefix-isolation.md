@@ -6,7 +6,7 @@
 
 ## Context
 
-The mock provider API serves both public-tier (redistributed open data) and private-tier (restricted PFF, etc.) content from the same infrastructure. AWS supports two reasonable shapes for tier-isolated S3:
+The mock provider API serves both public-tier (redistributed open data) and private-tier (restricted Gradient Sports, etc.) content from the same infrastructure. AWS supports two reasonable shapes for tier-isolated S3:
 
 - One bucket per tier (separate `pining-for-the-data-public`, `pining-for-the-data-private` buckets, separate KMS keys, separate IAM roles)
 - One bucket with prefix isolation (`{provider}/...` for public, `{provider}/_private/...` for private; one KMS key; one IAM role)

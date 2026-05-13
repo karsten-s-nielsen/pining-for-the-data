@@ -15,7 +15,7 @@ Some provider data is not associated with a single match: player biographical da
 
 Use **first-class resource nouns**, modelled after industry providers (StatsBomb, Wyscout, Opta). v1 ships `/v1/{provider}/players` (list) and `/v1/{provider}/players/{id}` (single record). Future nouns (`/teams`, `/competitions`, etc.) follow the same template and add no architectural complexity.
 
-A canonical Pydantic model (`PlayerRecord`) defines the shape per resource type. Provider-specific extensions (PFF's `firstName`/`lastName`/`positionGroupType`) are recognised verbatim via `additionalProperties: true`.
+A canonical Pydantic model (`PlayerRecord`) defines the shape per resource type. Provider-specific extensions (Gradient Sports' `firstName`/`lastName`/`positionGroupType`) are recognised verbatim via `additionalProperties: true`.
 
 ## Consequences
 

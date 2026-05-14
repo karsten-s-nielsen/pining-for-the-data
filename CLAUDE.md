@@ -63,3 +63,7 @@ The mock API serves two visibility tiers:
 Rotation: bump `LAST_ROTATION` env var on all 6 Lambdas via `terraform apply -var=last_rotation=$(date -u +%Y%m%dT%H%M%SZ)` after `aws ssm put-parameter --overwrite`. No dual-validity in v1; consumers must implement 401 retry during the rotation window.
 
 Full design: `docs/superpowers/specs/2026-05-02-private-data-tier.md`. Architectural decisions: `docs/decisions/`.
+
+## Pre-commit quality gate
+
+Always run the `final-review` skill before the final commit of any implementation plan or multi-file change. This is non-negotiable — the skill catches documentation drift, stale references, missing test updates, and consistency issues that are invisible during incremental work.

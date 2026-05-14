@@ -213,6 +213,10 @@ pining-for-the-data/
 - **Terraform** for AWS mock API infrastructure
 - **ruff** for linting/formatting, **pyright** for type checking, **pytest** for testing
 
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development setup, coding standards, and pull request guidelines. Please read our [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) before participating.
+
 ## License
 
 Code: [MIT](LICENSE)

@@ -149,7 +149,7 @@ def main() -> None:
         description="Upload a canonical-JSON player catalogue to the mock provider API's S3 bucket"
     )
     parser.add_argument("input_file", type=Path, help="Canonical JSON file with player records")
-    parser.add_argument("--provider", required=True, help="Provider name (e.g., gradient-sports)")
+    parser.add_argument("--provider", required=True, help="Provider name (e.g., gradientsports)")
     parser.add_argument(
         "--bucket",
         required=False,

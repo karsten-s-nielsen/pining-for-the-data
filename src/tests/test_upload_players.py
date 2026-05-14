@@ -65,7 +65,7 @@ class TestUploadPlayersCSVRejection:
 
         with patch("mock_api.upload_players.boto3.client", return_value=_empty_s3()):
             with pytest.raises(ValueError, match="canonical JSON"):
-                upload_players(csv_file, provider="gradient-sports", bucket="b", visibility="private")
+                upload_players(csv_file, provider="gradientsports", bucket="b", visibility="private")
 
     def test_csv_rejection_message_mentions_reference_adapter(self, tmp_path):
         from mock_api.upload_players import upload_players
@@ -75,7 +75,7 @@ class TestUploadPlayersCSVRejection:
 
         with patch("mock_api.upload_players.boto3.client", return_value=_empty_s3()):
             with pytest.raises(ValueError, match="upload_gradient_wc2022"):
-                upload_players(csv_file, provider="gradient-sports", bucket="b", visibility="private")
+                upload_players(csv_file, provider="gradientsports", bucket="b", visibility="private")
 
 
 class TestUploadPlayersCanonicalJSON:
@@ -88,7 +88,7 @@ class TestUploadPlayersCanonicalJSON:
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             upload_players(
                 json_file,
-                provider="gradient-sports",
+                provider="gradientsports",
                 bucket="b",
                 visibility="private",
                 source_name="Gradient Sports",
@@ -97,7 +97,7 @@ class TestUploadPlayersCanonicalJSON:
             )
 
         keys = [c.kwargs.get("Key") for c in s3.put_object.call_args_list]
-        assert "gradient-sports/_private/players.json" in keys
+        assert "gradientsports/_private/players.json" in keys
 
     def test_public_visibility_writes_to_provider_root(self, tmp_path):
         from mock_api.upload_players import upload_players
@@ -121,17 +121,17 @@ class TestUploadPlayersCanonicalJSON:
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             upload_players(
                 json_file,
-                provider="gradient-sports",
+                provider="gradientsports",
                 bucket="b",
                 visibility="private",
                 source_name="Gradient Sports",
             )
 
-        private_key = "gradient-sports/_private/players.json"
+        private_key = "gradientsports/_private/players.json"
         put_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == private_key]
         assert len(put_calls) == 1
         body = json.loads(put_calls[0].kwargs["Body"].decode("utf-8"))
-        assert body["provider"] == "gradient-sports"
+        assert body["provider"] == "gradientsports"
         assert len(body["players"]) == 2
 
         alpha = next(p for p in body["players"] if p["id"] == "test-001")
@@ -153,7 +153,7 @@ class TestUploadPlayersCanonicalJSON:
 
         with patch("mock_api.upload_players.boto3.client", return_value=_empty_s3()):
             with pytest.raises(Exception):  # noqa: B017 — pydantic.ValidationError
-                upload_players(bad_file, provider="gradient-sports", bucket="b", visibility="private")
+                upload_players(bad_file, provider="gradientsports", bucket="b", visibility="private")
 
     def test_idempotent_reupload_replaces_existing(self, tmp_path):
         from mock_api.upload_players import upload_players
@@ -161,7 +161,7 @@ class TestUploadPlayersCanonicalJSON:
         json_file = _canonical_json_path(tmp_path)
 
         existing_private = {
-            "provider": "gradient-sports",
+            "provider": "gradientsports",
             "players": [
                 {
                     "id": "test-001",
@@ -181,16 +181,16 @@ class TestUploadPlayersCanonicalJSON:
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         def get_obj(Bucket, Key):
-            if Key == "gradient-sports/_private/players.json":
+            if Key == "gradientsports/_private/players.json":
                 return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_private).encode()))}
             raise s3.exceptions.NoSuchKey()
 
         s3.get_object.side_effect = get_obj
 
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
-            upload_players(json_file, provider="gradient-sports", bucket="b", visibility="private")
+            upload_players(json_file, provider="gradientsports", bucket="b", visibility="private")
 
-        private_key = "gradient-sports/_private/players.json"
+        private_key = "gradientsports/_private/players.json"
         put_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == private_key]
         body = json.loads(put_calls[0].kwargs["Body"].decode("utf-8"))
         ids = sorted(p["id"] for p in body["players"])
@@ -208,7 +208,7 @@ class TestUploadPlayersCanonicalJSON:
         # An entry already exists in the OTHER tier (public), with the same id
         # the incoming private upload contains. This trips cross-tier dedup.
         existing_public = {
-            "provider": "gradient-sports",
+            "provider": "gradientsports",
             "players": [
                 {"id": "test-001", "nickname": "Existing", "visibility": "public", "updated_at": "2025-01-01T00:00:00Z"}
             ],
@@ -217,7 +217,7 @@ class TestUploadPlayersCanonicalJSON:
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         def get_obj(Bucket, Key):
-            if Key == "gradient-sports/players.json":
+            if Key == "gradientsports/players.json":
                 return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_public).encode()))}
             raise s3.exceptions.NoSuchKey()
 
@@ -225,7 +225,7 @@ class TestUploadPlayersCanonicalJSON:
 
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             with pytest.raises(ValueError, match=r"[Cc]ross-tier"):
-                upload_players(json_file, provider="gradient-sports", bucket="b", visibility="private")
+                upload_players(json_file, provider="gradientsports", bucket="b", visibility="private")
 
     def test_cross_tier_dedup_check_scans_both_files(self, tmp_path):
         """Spec §6.5: cross-tier dedup check reads BOTH players.json files before write."""
@@ -234,7 +234,7 @@ class TestUploadPlayersCanonicalJSON:
         json_file = _canonical_json_path(tmp_path)
 
         existing_public = {
-            "provider": "gradient-sports",
+            "provider": "gradientsports",
             "players": [
                 {
                     "id": "test-001",
@@ -248,7 +248,7 @@ class TestUploadPlayersCanonicalJSON:
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         def get_obj(Bucket, Key):
-            if Key == "gradient-sports/players.json":
+            if Key == "gradientsports/players.json":
                 return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_public).encode()))}
             raise s3.exceptions.NoSuchKey()
 
@@ -256,7 +256,7 @@ class TestUploadPlayersCanonicalJSON:
 
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             with pytest.raises(ValueError, match=r"[Cc]ross-tier|other tier"):
-                upload_players(json_file, provider="gradient-sports", bucket="b", visibility="private")
+                upload_players(json_file, provider="gradientsports", bucket="b", visibility="private")
 
 
 class TestSourceLicenseAlias:

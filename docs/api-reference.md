@@ -43,7 +43,7 @@ Returns all registered tracking data providers. **Tier-blind** — returns the s
 
 ```json
 {
-  "providers": ["skillcorner", "gradient-sports"]
+  "providers": ["skillcorner", "gradientsports"]
 }
 ```
 
@@ -191,7 +191,7 @@ Returns the player reference catalogue for a provider, **filtered by tier**. Pro
 
 ```json
 {
-  "provider": "gradient-sports",
+  "provider": "gradientsports",
   "players": [
     {
       "id": "example-007",
@@ -278,7 +278,7 @@ Unauthenticated health check for synthetic monitoring and uptime probes. Returns
 
 ```
 {bucket}/
-├── providers.json              # ["skillcorner", "gradient-sports"]
+├── providers.json              # ["skillcorner", "gradientsports"]
 ├── skillcorner/                # public-tier provider
 │   ├── matches.json            # discovery index (object-form artifacts dict)
 │   ├── players.json            # (optional) public-tier player catalogue
@@ -287,7 +287,7 @@ Unauthenticated health check for synthetic monitoring and uptime probes. Returns
 │   │   └── tracking.jsonl
 │   └── game_04/
 │       └── ...
-└── gradient-sports/            # restricted-tier provider
+└── gradientsports/            # restricted-tier provider
     ├── matches.json            # all entries marked visibility:"private"
     └── _private/               # reserved segment — owner-tier only
         ├── players.json        # private-tier player catalogue

@@ -43,7 +43,7 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 from mock_api.upload import upload_game  # noqa: E402
 from mock_api.upload_players import upload_players  # noqa: E402
 
-PROVIDER = "gradient-sports"
+PROVIDER = "gradientsports"
 SOURCE_NAME = "Gradient Sports"
 SOURCE_URL = "https://www.gradientsports.com/"
 SOURCE_LICENCE = "Restricted; redistribution not permitted pending licence clarification"
@@ -74,7 +74,7 @@ def main() -> None:
         if not players_csv.is_file():
             print(f"WARN: {players_csv} not found, skipping player catalogue upload")
         else:
-            with tempfile.TemporaryDirectory(prefix="gradient-players-") as tmp:
+            with tempfile.TemporaryDirectory(prefix="gradientsports-players-") as tmp:
                 canonical_json = Path(tmp) / "players.json"
                 count = _normalise_players_csv_to_canonical(players_csv, canonical_json)
                 print(f"Normalised {count} Gradient Sports player(s) to canonical JSON at {canonical_json}")
@@ -148,7 +148,7 @@ def _upload_one_match(source_dir: Path, match_id: str, bucket: str) -> None:
     home = (metadata_obj.get("homeTeam") or {}).get("name", "")
     away = (metadata_obj.get("awayTeam") or {}).get("name", "")
 
-    with tempfile.TemporaryDirectory(prefix=f"gradient-{match_id}-") as tmp:
+    with tempfile.TemporaryDirectory(prefix=f"gradientsports-{match_id}-") as tmp:
         staging = Path(tmp)
         shutil.copy(metadata_path, staging / "metadata.json")
         shutil.copy(events_path, staging / "events.json")

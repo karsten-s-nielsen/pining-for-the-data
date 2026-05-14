@@ -126,7 +126,7 @@ Visibility is **not** a property of the provider. The same real-world provider c
 
 ```json
 {
-  "provider": "gradient-sports",
+  "provider": "gradientsports",
   "matches": [
     {
       "id": "example-001",
@@ -170,9 +170,9 @@ The full canonical shape of a match entry is defined by a Pydantic model `MatchE
 
 If filtering produces an empty list and the underlying `matches.json` is non-empty, the response is still 200 with `{"matches": []}` — not 404 — so the public tier cannot probe for the existence of any private matches.
 
-`list_providers` returns the same provider list to both tiers — explicitly. Rationale: the *existence* of a provider is not a secret; the per-match visibility flag is the only enforcement boundary. Hiding providers from the public tier would force the Lakehouse adapter to know which providers it has access to out-of-band, which is the opposite of what an API is for. A consumer hitting `/v1/gradient-sports/matches` with the public token sees an empty matches list — which is correct: `gradient-sports` exists, you just don't have access to anything in it.
+`list_providers` returns the same provider list to both tiers — explicitly. Rationale: the *existence* of a provider is not a secret; the per-match visibility flag is the only enforcement boundary. Hiding providers from the public tier would force the Lakehouse adapter to know which providers it has access to out-of-band, which is the opposite of what an API is for. A consumer hitting `/v1/gradientsports/matches` with the public token sees an empty matches list — which is correct: `gradientsports` exists, you just don't have access to anything in it.
 
-A unit test (`test_public_tier_sees_gradient_sports_in_provider_list`) pins this behaviour so a future contributor doesn't quietly add tier filtering thinking it tightens security.
+A unit test (`test_public_tier_sees_gradientsports_in_provider_list`) pins this behaviour so a future contributor doesn't quietly add tier filtering thinking it tightens security.
 
 `list_players` and `get_player` (section 6) follow the same rule for unknown-provider 404 as `list_matches`: gate on `providers.json` membership before reading the per-provider index, so an unknown provider returns 404 from every endpoint and the public tier cannot enumerate the provider namespace by behaviour fingerprinting.
 
@@ -212,7 +212,7 @@ karstenskyt-pining-for-the-data/
 │       ├── players.json                # private-tier player reference
 │       └── soccermatics_match_42/
 │           └── ...
-└── gradient-sports/
+└── gradientsports/
     ├── matches.json                    # all-private initially
     └── _private/
         ├── players.json                # ~2,300 player records, all private
@@ -290,7 +290,7 @@ A canonical player record is defined here so a future provider's data shape does
 
 ```json
 {
-  "provider": "gradient-sports",
+  "provider": "gradientsports",
   "players": [
     {
       "id": "example-007",
@@ -337,7 +337,7 @@ New CLI: `pining-upload-players`. Input is canonical-JSON only — a list of `Pl
 
 ```bash
 pining-upload-players players.json \
-  --provider gradient-sports \
+  --provider gradientsports \
   --bucket karstenskyt-pining-for-the-data \
   --visibility private \
   --source-name "Gradient Sports" \
@@ -395,7 +395,7 @@ The drift test (asserts `model.model_json_schema()` matches the committed file) 
 
 ### 6.7 What we do NOT do
 
-- **No `/competitions` endpoint for v1.** Gradient Sports' `competitions.csv` is essentially a directory of match IDs by tournament — that's already reachable via `GET /v1/gradient-sports/matches` (which can be extended with a `?competition_id=` filter when needed). Republishing it as a separate resource would duplicate the navigation already provided by `/matches`.
+- **No `/competitions` endpoint for v1.** Gradient Sports' `competitions.csv` is essentially a directory of match IDs by tournament — that's already reachable via `GET /v1/gradientsports/matches` (which can be extended with a `?competition_id=` filter when needed). Republishing it as a separate resource would duplicate the navigation already provided by `/matches`.
 - **No `/teams` endpoint for v1.** Per-match `metadata.json` already carries the team object (`{id, name, shortName, kit}`). There's no team-level data not already on matches. Easy to add later if a future provider ships team-level reference data not derivable from matches.
 - **No generic `/files` escape hatch.** If a future provider ships something that genuinely doesn't fit a noun (a PDF schema, a binary calibration file), we'll add a noun for it then. Designing a generic escape hatch up front incentivises lazy modelling.
 
@@ -489,10 +489,10 @@ The script:
    └── tracking.jsonl.bz2
    ```
 3. Reads `Metadata/{id}.json` to extract `date`, `home.name`, `away.name`.
-4. Invokes `pining-upload --provider gradient-sports --game-id {id} --visibility private --provenance original --source-name "Gradient Sports" --source-url "https://www.gradientsports.com/" --source-licence "Restricted; redistribution not permitted pending licence clarification"` with those values.
-5. After all matches: reads `players.csv`, normalises each row into a canonical `PlayerRecord` JSON dict (renaming/coercing fields to match the schema in section 6.3), writes the normalised list to a temp `players.json`, then invokes `pining-upload-players players.json --provider gradient-sports --visibility private --source-licence "..."` with the same source metadata. The CSV→canonical normaliser lives in this script; `pining-upload-players` only consumes canonical JSON (per section 6.5).
+4. Invokes `pining-upload --provider gradientsports --game-id {id} --visibility private --provenance original --source-name "Gradient Sports" --source-url "https://www.gradientsports.com/" --source-licence "Restricted; redistribution not permitted pending licence clarification"` with those values.
+5. After all matches: reads `players.csv`, normalises each row into a canonical `PlayerRecord` JSON dict (renaming/coercing fields to match the schema in section 6.3), writes the normalised list to a temp `players.json`, then invokes `pining-upload-players players.json --provider gradientsports --visibility private --source-licence "..."` with the same source metadata. The CSV→canonical normaliser lives in this script; `pining-upload-players` only consumes canonical JSON (per section 6.5).
 
-`competitions.csv` is intentionally not uploaded. It is a tournament-level directory of match IDs, which is fully reachable via `GET /v1/gradient-sports/matches` once all 64 matches are loaded. Republishing it as a separate resource would duplicate navigation that the matches endpoint already provides.
+`competitions.csv` is intentionally not uploaded. It is a tournament-level directory of match IDs, which is fully reachable via `GET /v1/gradientsports/matches` once all 64 matches are loaded. Republishing it as a separate resource would duplicate navigation that the matches endpoint already provides.
 
 The script is idempotent: re-running re-uploads everything but produces no duplicate index entries. Useful both for the initial load and for re-runs after correcting any per-match metadata.
 
@@ -500,9 +500,9 @@ The script is idempotent: re-running re-uploads everything but produces no dupli
 
 After the bulk load (or after any future bulk-load of a different provider), `scripts/verify_gradient_load.py` (and the analogous `verify_<provider>_load.py` for future providers) runs an automated post-condition check that exits non-zero on:
 
-- match count mismatch (owner-tier `/gradient-sports/matches` does not return exactly 67 entries)
-- player count mismatch (owner-tier `/gradient-sports/players` does not return exactly 2,322 entries)
-- visibility leak (public-tier `/gradient-sports/matches` or `/gradient-sports/players` returns any entries)
+- match count mismatch (owner-tier `/gradientsports/matches` does not return exactly 67 entries)
+- player count mismatch (owner-tier `/gradientsports/players` does not return exactly 2,322 entries)
+- visibility leak (public-tier `/gradientsports/matches` or `/gradientsports/players` returns any entries)
 - artifact-fetch failure on a small spot-check set (e.g., 5 random matches × 4 artifacts each, owner-tier presigned-URL follow returns 200 + non-empty body)
 - player spot-check failure (specific known-good IDs return 200 with the expected `firstName`/`lastName`)
 
@@ -567,9 +567,9 @@ Licence clarification has been requested from the source; awaiting response. Thr
 v1 doesn't ship a `pining-retier` CLI; the upload tooling rejects any re-upload that flips a match's or player's visibility (section 8.2). Re-tiering is a deliberately rare operation (typically: Gradient Sports licence clarifies as permissive, and 64 matches need to flip from private to public). The manual procedure:
 
 1. **Plan the move.** List affected match IDs (or player IDs) up front. For Gradient Sports: every match in `matches.json`. For a partial re-tier: the explicit subset.
-2. **Copy the S3 objects to the new prefix.** For each match: `aws s3 cp --recursive s3://$BUCKET/gradient-sports/_private/$MATCH_ID/ s3://$BUCKET/gradient-sports/$MATCH_ID/`. For the players index: copy the file to its new tier path.
+2. **Copy the S3 objects to the new prefix.** For each match: `aws s3 cp --recursive s3://$BUCKET/gradientsports/_private/$MATCH_ID/ s3://$BUCKET/gradientsports/$MATCH_ID/`. For the players index: copy the file to its new tier path.
 3. **Edit `matches.json` (and `players.json`) under optimistic concurrency control.** Read the current index, capture its S3 ETag from the GET response (`obj["ETag"]`), flip every affected entry's `visibility` field, update `updated_at` to the current UTC time, write back via `s3.put_object(..., IfMatch=<previous_etag>)`. The conditional write fails fast (S3 returns 412 Precondition Failed) if the index was modified between read and write — typically by a concurrent `pining-upload` invocation. The operator handles failure by re-reading and retrying. A small one-shot Python script using boto3 is the right shape — do not hand-edit JSON.
-4. **Delete the old objects.** `aws s3 rm --recursive s3://$BUCKET/gradient-sports/_private/$MATCH_ID/` after step 2 has succeeded for every match. Skipping this leaves orphan files in the old prefix, invisible to the API but billed for storage. CloudTrail (section 7) captures the deletes.
+4. **Delete the old objects.** `aws s3 rm --recursive s3://$BUCKET/gradientsports/_private/$MATCH_ID/` after step 2 has succeeded for every match. Skipping this leaves orphan files in the old prefix, invisible to the API but billed for storage. CloudTrail (section 7) captures the deletes.
 5. **Verify.** Run the post-load verification script (section 8.3.1) against the new tier configuration: counts unchanged, public-tier now sees what owner-tier saw (or the agreed subset), no 404s on previously-working artifacts.
 
 The orphan-file risk in step 4 is the main reason this isn't a one-button CLI: a pining-retier helper that did steps 2 and 3 but forgot step 4 would silently degrade to "data exists in two places, only one is served, storage doubles" — the kind of failure that goes unnoticed for months. A documented manual procedure makes the operator do step 4 deliberately.
@@ -597,7 +597,7 @@ Cost vs current single-token model: one extra SSM parameter, one cleanup Lambda,
 Unit (in `src/tests/test_lambda_handlers.py`):
 
 - `validate_token` returns `Tier.PUBLIC` for the public token, `Tier.OWNER` for the owner token, error response for any other input. Duplicate-token misconfiguration classifies as `Tier.PUBLIC` (fail closed; section 3.2).
-- `list_providers` returns the same provider list to both tiers (`test_public_tier_sees_gradient_sports_in_provider_list`).
+- `list_providers` returns the same provider list to both tiers (`test_public_tier_sees_gradientsports_in_provider_list`).
 - `list_matches` returns only public entries to the public tier; returns all entries to the owner tier; returns 200 with empty list (not 404) when filtering removes everything; returns 404 for unknown providers.
 - `list_players` mirrors the same tier-filter semantics: public tier sees only `players.json`; owner tier sees the merge of `players.json` and `_private/players.json`. Returns 404 for unknown providers (gated on `providers.json` membership). Cross-tier ID collision: owner-tier sees the private record (private wins; section 6.3.1).
 - `get_artifact` returns 404 (not 403) for `visibility=private` matches accessed with the public tier; returns 302 for the same match accessed with the owner tier.

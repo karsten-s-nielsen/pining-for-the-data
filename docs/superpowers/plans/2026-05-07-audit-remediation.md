@@ -328,7 +328,7 @@ To upload restricted data visible only to the owner token:
 
 ```bash
 uv run pining-upload path/to/game/ \
-  --provider gradient-sports \
+  --provider gradientsports \
   --game-id example-001 \
   --bucket "karstenskyt-pining-for-the-data" \
   --visibility private
@@ -379,7 +379,7 @@ ls -la tracking.jsonl
 curl -s -H "Authorization: Bearer $TOKEN" "$API/skillcorner/players" | python -m json.tool
 
 # Get a single player
-curl -s -H "Authorization: Bearer $TOKEN" "$API/gradient-sports/players/example-007" | python -m json.tool
+curl -s -H "Authorization: Bearer $TOKEN" "$API/gradientsports/players/example-007" | python -m json.tool
 
 # Health check (no auth required)
 curl -s "$API/health" | python -m json.tool
@@ -1027,9 +1027,9 @@ def test_read_player_index_returns_players(s3_stub):
     import json as json_mod
     from shared import get_s3_client, read_player_index
     s3 = get_s3_client()
-    s3.put_object(Bucket="test-bucket", Key="gradient-sports/players.json",
+    s3.put_object(Bucket="test-bucket", Key="gradientsports/players.json",
                   Body=json_mod.dumps({"players": [{"id": "p1"}]}).encode())
-    assert read_player_index(s3, "test-bucket", "gradient-sports/players.json") == [{"id": "p1"}]
+    assert read_player_index(s3, "test-bucket", "gradientsports/players.json") == [{"id": "p1"}]
 
 
 def test_read_player_index_returns_empty_on_missing(s3_stub):

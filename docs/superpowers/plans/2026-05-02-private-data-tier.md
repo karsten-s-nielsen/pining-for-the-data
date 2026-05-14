@@ -1266,10 +1266,10 @@ class TestUploadVisibility:
         s3.get_object.side_effect = s3.exceptions.NoSuchKey()
 
         with patch("mock_api.upload.boto3.client", return_value=s3):
-            upload_game(game_dir, provider="gradient-sports", game_id="m-001", bucket="b", visibility="private")
+            upload_game(game_dir, provider="gradientsports", game_id="m-001", bucket="b", visibility="private")
 
         upload_keys = [c.args[2] for c in s3.upload_file.call_args_list]
-        assert any(k == "gradient-sports/_private/m-001/match.json" for k in upload_keys)
+        assert any(k == "gradientsports/_private/m-001/match.json" for k in upload_keys)
 
     def test_private_visibility_and_updated_at_and_artifacts_object_recorded(self, tmp_path):
         from unittest.mock import MagicMock, patch
@@ -1286,10 +1286,10 @@ class TestUploadVisibility:
         s3.get_object.side_effect = s3.exceptions.NoSuchKey()
 
         with patch("mock_api.upload.boto3.client", return_value=s3):
-            upload_game(game_dir, provider="gradient-sports", game_id="m-001", bucket="b", visibility="private")
+            upload_game(game_dir, provider="gradientsports", game_id="m-001", bucket="b", visibility="private")
 
         # Find the put_object call that wrote matches.json
-        matches_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "gradient-sports/matches.json"]
+        matches_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "gradientsports/matches.json"]
         assert len(matches_calls) == 1
         body = json.loads(matches_calls[0].kwargs["Body"].decode("utf-8"))
         entry = body["matches"][0]
@@ -1747,13 +1747,13 @@ class TestListMatches(_ResetS3):
         self._setup(monkeypatch)
 
         mock_s3 = _mock_s3()
-        all_private = {"provider": "gradient-sports", "matches": [{"id": "m-001", "artifacts": ["m"], "visibility": "private"}]}
+        all_private = {"provider": "gradientsports", "matches": [{"id": "m-001", "artifacts": ["m"], "visibility": "private"}]}
         body = json.dumps(all_private).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         event = {
             "headers": {"authorization": "Bearer pub-tok"},
-            "pathParameters": {"provider": "gradient-sports"},
+            "pathParameters": {"provider": "gradientsports"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 200
@@ -1788,20 +1788,20 @@ class TestListProviders(_ResetS3):
         shared._get_owner_token.cache_clear()
         monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
 
-    def test_public_tier_sees_gradient_sports_in_provider_list(self, monkeypatch) -> None:
+    def test_public_tier_sees_gradientsports_in_provider_list(self, monkeypatch) -> None:
         from list_providers import handler
         import json
         self._setup(monkeypatch)
 
         mock_s3 = _mock_s3()
-        body = json.dumps({"providers": ["skillcorner", "gradient-sports"]}).encode()
+        body = json.dumps({"providers": ["skillcorner", "gradientsports"]}).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         event = {"headers": {"authorization": "Bearer pub-tok"}}
         result = handler(event, None)
         assert result["statusCode"] == 200
-        # Even though gradient-sports is all-private, public tier sees it in the provider catalogue.
-        assert "gradient-sports" in json.loads(result["body"])["providers"]
+        # Even though gradientsports is all-private, public tier sees it in the provider catalogue.
+        assert "gradientsports" in json.loads(result["body"])["providers"]
 
     def test_owner_tier_sees_same_provider_list(self, monkeypatch) -> None:
         from list_providers import handler
@@ -1809,13 +1809,13 @@ class TestListProviders(_ResetS3):
         self._setup(monkeypatch)
 
         mock_s3 = _mock_s3()
-        body = json.dumps({"providers": ["skillcorner", "gradient-sports"]}).encode()
+        body = json.dumps({"providers": ["skillcorner", "gradientsports"]}).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         event = {"headers": {"authorization": "Bearer own-tok"}}
         result = handler(event, None)
         assert result["statusCode"] == 200
-        assert json.loads(result["body"])["providers"] == ["skillcorner", "gradient-sports"]
+        assert json.loads(result["body"])["providers"] == ["skillcorner", "gradientsports"]
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
@@ -1949,7 +1949,7 @@ class TestGetArtifact(_ResetS3):
         mock_s3 = _mock_s3()
         self._wire_matches(
             mock_s3,
-            {"provider": "gradient-sports", "matches": [
+            {"provider": "gradientsports", "matches": [
                 {"id": "m-001",
                  "artifacts": {"metadata": "metadata.json"},
                  "visibility": "private",
@@ -1959,12 +1959,12 @@ class TestGetArtifact(_ResetS3):
 
         event = {
             "headers": {"authorization": "Bearer own-tok"},
-            "pathParameters": {"provider": "gradient-sports", "id": "m-001", "artifact": "metadata"},
+            "pathParameters": {"provider": "gradientsports", "id": "m-001", "artifact": "metadata"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 302
         # Key resolves under _private/ for private match, no listing.
-        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "gradient-sports/_private/m-001/metadata.json"
+        assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == "gradientsports/_private/m-001/metadata.json"
         mock_s3.list_objects_v2.assert_not_called()
 
     def test_private_match_public_tier_returns_404(self, monkeypatch) -> None:
@@ -1974,7 +1974,7 @@ class TestGetArtifact(_ResetS3):
         mock_s3 = _mock_s3()
         self._wire_matches(
             mock_s3,
-            {"provider": "gradient-sports", "matches": [
+            {"provider": "gradientsports", "matches": [
                 {"id": "m-001",
                  "artifacts": {"metadata": "metadata.json"},
                  "visibility": "private",
@@ -1984,7 +1984,7 @@ class TestGetArtifact(_ResetS3):
 
         event = {
             "headers": {"authorization": "Bearer pub-tok"},
-            "pathParameters": {"provider": "gradient-sports", "id": "m-001", "artifact": "metadata"},
+            "pathParameters": {"provider": "gradientsports", "id": "m-001", "artifact": "metadata"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 404
@@ -2216,7 +2216,7 @@ class TestListPlayers(_ResetS3):
         shared._get_owner_token.cache_clear()
         monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
 
-    def _wire(self, mock_s3, providers=("sc", "gradient-sports"), public_payload=None, private_payload=None):
+    def _wire(self, mock_s3, providers=("sc", "gradientsports"), public_payload=None, private_payload=None):
         """Wire mock_s3 with a providers.json + per-provider players indexes."""
         import json
         mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
@@ -2301,7 +2301,7 @@ class TestListPlayers(_ResetS3):
         from list_players import handler
         self._setup(monkeypatch)
         mock_s3 = _mock_s3()
-        self._wire(mock_s3, providers=("sc", "gradient-sports"))
+        self._wire(mock_s3, providers=("sc", "gradientsports"))
 
         event = {
             "headers": {"authorization": "Bearer pub-tok"},
@@ -2466,7 +2466,7 @@ class TestGetPlayer(_ResetS3):
         shared._get_owner_token.cache_clear()
         monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
 
-    def _wire(self, mock_s3, providers=("sc", "gradient-sports"), public_payload=None, private_payload=None):
+    def _wire(self, mock_s3, providers=("sc", "gradientsports"), public_payload=None, private_payload=None):
         import json
         mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
         providers_body = json.dumps({"providers": list(providers)}).encode()
@@ -2555,7 +2555,7 @@ class TestGetPlayer(_ResetS3):
         from get_player import handler
         self._setup(monkeypatch)
         mock_s3 = _mock_s3()
-        self._wire(mock_s3, providers=("sc", "gradient-sports"))
+        self._wire(mock_s3, providers=("sc", "gradientsports"))
 
         event = {
             "headers": {"authorization": "Bearer own-tok"},
@@ -3000,7 +3000,7 @@ class TestUploadPlayersCSVRejection:
         s3 = _empty_s3()
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             with pytest.raises(ValueError, match="canonical JSON"):
-                upload_players(csv_file, provider="gradient-sports", bucket="b", visibility="private")
+                upload_players(csv_file, provider="gradientsports", bucket="b", visibility="private")
 
     def test_csv_rejection_message_mentions_reference_adapter(self, tmp_path):
         from mock_api.upload_players import upload_players
@@ -3011,7 +3011,7 @@ class TestUploadPlayersCSVRejection:
 
         with patch("mock_api.upload_players.boto3.client", return_value=_empty_s3()):
             with pytest.raises(ValueError, match="upload_gradient_wc2022"):
-                upload_players(csv_file, provider="gradient-sports", bucket="b", visibility="private")
+                upload_players(csv_file, provider="gradientsports", bucket="b", visibility="private")
 
 
 class TestUploadPlayersCanonicalJSON:
@@ -3022,12 +3022,12 @@ class TestUploadPlayersCanonicalJSON:
         s3 = _empty_s3()
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             upload_players(
-                json_file, provider="gradient-sports", bucket="b", visibility="private",
+                json_file, provider="gradientsports", bucket="b", visibility="private",
                 source_name="Gradient Sports", source_url="https://www.gradientsports.com/", source_licence="Restricted",
             )
 
         keys = [c.kwargs.get("Key") for c in s3.put_object.call_args_list]
-        assert "gradient-sports/_private/players.json" in keys
+        assert "gradientsports/_private/players.json" in keys
 
     def test_public_visibility_writes_to_provider_root(self, tmp_path):
         from mock_api.upload_players import upload_players
@@ -3048,14 +3048,14 @@ class TestUploadPlayersCanonicalJSON:
         s3 = _empty_s3()
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             upload_players(
-                json_file, provider="gradient-sports", bucket="b", visibility="private",
+                json_file, provider="gradientsports", bucket="b", visibility="private",
                 source_name="Gradient Sports",
             )
 
-        put_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "gradient-sports/_private/players.json"]
+        put_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "gradientsports/_private/players.json"]
         assert len(put_calls) == 1
         body = json.loads(put_calls[0].kwargs["Body"].decode("utf-8"))
-        assert body["provider"] == "gradient-sports"
+        assert body["provider"] == "gradientsports"
         assert len(body["players"]) == 2
 
         alpha = next(p for p in body["players"] if p["id"] == "test-001")
@@ -3079,14 +3079,14 @@ class TestUploadPlayersCanonicalJSON:
 
         with patch("mock_api.upload_players.boto3.client", return_value=_empty_s3()):
             with pytest.raises((ValueError, Exception)):
-                upload_players(bad_file, provider="gradient-sports", bucket="b", visibility="private")
+                upload_players(bad_file, provider="gradientsports", bucket="b", visibility="private")
 
     def test_idempotent_reupload_replaces_existing(self, tmp_path):
         from mock_api.upload_players import upload_players
         json_file = _canonical_json_path(tmp_path)
 
         existing_private = {
-            "provider": "gradient-sports",
+            "provider": "gradientsports",
             "players": [
                 {"id": "test-001", "nickname": "Old Name", "visibility": "private", "updated_at": "2025-01-01T00:00:00Z"},
                 {"id": "test-999", "nickname": "Untouched", "visibility": "private", "updated_at": "2025-01-01T00:00:00Z"},
@@ -3096,16 +3096,16 @@ class TestUploadPlayersCanonicalJSON:
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         def get_obj(Bucket, Key):
-            if Key == "gradient-sports/_private/players.json":
+            if Key == "gradientsports/_private/players.json":
                 return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_private).encode()))}
             raise s3.exceptions.NoSuchKey()
 
         s3.get_object.side_effect = get_obj
 
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
-            upload_players(json_file, provider="gradient-sports", bucket="b", visibility="private")
+            upload_players(json_file, provider="gradientsports", bucket="b", visibility="private")
 
-        put_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "gradient-sports/_private/players.json"]
+        put_calls = [c for c in s3.put_object.call_args_list if c.kwargs.get("Key") == "gradientsports/_private/players.json"]
         body = json.loads(put_calls[0].kwargs["Body"].decode("utf-8"))
         ids = sorted(p["id"] for p in body["players"])
         assert ids == ["test-001", "test-002", "test-999"]
@@ -3120,14 +3120,14 @@ class TestUploadPlayersCanonicalJSON:
         json_file = _canonical_json_path(tmp_path)
 
         existing_public = {
-            "provider": "gradient-sports",
+            "provider": "gradientsports",
             "players": [{"id": "test-001", "nickname": "Existing", "visibility": "public", "updated_at": "2025-01-01T00:00:00Z"}],
         }
         s3 = MagicMock()
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         def get_obj(Bucket, Key):
-            if Key == "gradient-sports/players.json":
+            if Key == "gradientsports/players.json":
                 return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_public).encode()))}
             raise s3.exceptions.NoSuchKey()
 
@@ -3135,7 +3135,7 @@ class TestUploadPlayersCanonicalJSON:
 
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             with pytest.raises(ValueError, match="tier"):
-                upload_players(json_file, provider="gradient-sports", bucket="b", visibility="private")
+                upload_players(json_file, provider="gradientsports", bucket="b", visibility="private")
 
     def test_cross_tier_dedup_check_scans_both_files(self, tmp_path):
         """Spec §6.5: cross-tier dedup check reads BOTH players.json files before write."""
@@ -3145,14 +3145,14 @@ class TestUploadPlayersCanonicalJSON:
 
         # test-001 lives in the OTHER tier (public); writing private must fail.
         existing_public = {
-            "provider": "gradient-sports",
+            "provider": "gradientsports",
             "players": [{"id": "test-001", "nickname": "Other Tier", "visibility": "public", "updated_at": "2025-01-01T00:00:00Z"}],
         }
         s3 = MagicMock()
         s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
 
         def get_obj(Bucket, Key):
-            if Key == "gradient-sports/players.json":
+            if Key == "gradientsports/players.json":
                 return {"Body": MagicMock(read=MagicMock(return_value=json.dumps(existing_public).encode()))}
             raise s3.exceptions.NoSuchKey()
 
@@ -3160,7 +3160,7 @@ class TestUploadPlayersCanonicalJSON:
 
         with patch("mock_api.upload_players.boto3.client", return_value=s3):
             with pytest.raises(ValueError, match="cross-tier|other tier"):
-                upload_players(json_file, provider="gradient-sports", bucket="b", visibility="private")
+                upload_players(json_file, provider="gradientsports", bucket="b", visibility="private")
 
     def test_source_license_alias_accepted(self, tmp_path, monkeypatch):
         """Spec §8.2.1: --source-license (American) is a quiet alias for --source-licence (British).
@@ -3381,7 +3381,7 @@ def main() -> None:
         description="Upload a canonical-JSON player catalogue to the mock provider API's S3 bucket"
     )
     parser.add_argument("input_file", type=Path, help="Canonical JSON file with player records")
-    parser.add_argument("--provider", required=True, help="Provider name (e.g., gradient-sports)")
+    parser.add_argument("--provider", required=True, help="Provider name (e.g., gradientsports)")
     parser.add_argument("--bucket", required=True, help="S3 bucket name")
     parser.add_argument("--visibility", default="public", choices=["public", "private"])
     parser.add_argument("--source-name", default=None)
@@ -3785,7 +3785,7 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 from mock_api.upload import upload_game  # noqa: E402
 from mock_api.upload_players import upload_players  # noqa: E402
 
-PROVIDER = "gradient-sports"
+PROVIDER = "gradientsports"
 SOURCE_NAME = "Gradient Sports"
 SOURCE_URL = "https://www.gradientsports.com/"
 SOURCE_LICENCE = "Restricted; redistribution not permitted pending licence clarification"
@@ -3976,7 +3976,7 @@ python scripts/upload_gradient_wc2022.py \
   --skip-players
 ```
 
-Expected: one match uploads successfully; matches.json updates with object-form `artifacts`, `updated_at`, and `visibility: "private"`; providers.json gains `gradient-sports`. The `--limit 1` flag picks the first match in alphabetical order from the source folder; the operator notes its ID for the next steps and exports it as `GRADIENT_SMOKE_MATCH_ID`:
+Expected: one match uploads successfully; matches.json updates with object-form `artifacts`, `updated_at`, and `visibility: "private"`; providers.json gains `gradientsports`. The `--limit 1` flag picks the first match in alphabetical order from the source folder; the operator notes its ID for the next steps and exports it as `GRADIENT_SMOKE_MATCH_ID`:
 
 ```bash
 # Operator captures the uploaded match ID for downstream curl steps. Not committed.
@@ -3988,32 +3988,32 @@ export GRADIENT_SMOKE_MATCH_ID=$(ls "$GRADIENT_SOURCE_DIR/Metadata" | head -1 | 
 ```bash
 API=$(cd terraform/environments/dev && terraform output -raw api_url)
 PUB="$PUB_TOKEN"
-curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/gradient-sports/matches/$GRADIENT_SMOKE_MATCH_ID/metadata"
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/gradientsports/matches/$GRADIENT_SMOKE_MATCH_ID/metadata"
 ```
 
 Expected: `404`.
 
-- [ ] **Step 3: Verify public token sees empty matches list for gradient-sports**
+- [ ] **Step 3: Verify public token sees empty matches list for gradientsports**
 
 ```bash
-curl -s -H "Authorization: Bearer $PUB" "$API/gradient-sports/matches" | python -m json.tool
+curl -s -H "Authorization: Bearer $PUB" "$API/gradientsports/matches" | python -m json.tool
 ```
 
-Expected: `{"provider": "gradient-sports", "matches": []}`.
+Expected: `{"provider": "gradientsports", "matches": []}`.
 
-- [ ] **Step 4: Verify public token still sees gradient-sports in the providers list (spec §4.2)**
+- [ ] **Step 4: Verify public token still sees gradientsports in the providers list (spec §4.2)**
 
 ```bash
 curl -s -H "Authorization: Bearer $PUB" "$API/providers" | python -m json.tool
 ```
 
-Expected: `gradient-sports` is in the providers list — visible to public tier (existence is not the secret).
+Expected: `gradientsports` is in the providers list — visible to public tier (existence is not the secret).
 
 - [ ] **Step 5: Verify owner token gets 302 + can fetch the metadata**
 
 ```bash
 OWNER=$(aws ssm get-parameter --name "/pining-for-the-data/api_token_owner" --with-decryption --query 'Parameter.Value' --output text)
-curl -s -L -H "Authorization: Bearer $OWNER" "$API/gradient-sports/matches/$GRADIENT_SMOKE_MATCH_ID/metadata" | python -m json.tool | head -5
+curl -s -L -H "Authorization: Bearer $OWNER" "$API/gradientsports/matches/$GRADIENT_SMOKE_MATCH_ID/metadata" | python -m json.tool | head -5
 ```
 
 Expected: 302 followed transparently to the presigned URL, then the metadata JSON prints. The body content is not asserted in this smoke test (any specific team/player names would themselves be Gradient Sports mapping data).
@@ -4021,7 +4021,7 @@ Expected: 302 followed transparently to the presigned URL, then the metadata JSO
 - [ ] **Step 6: Verify owner token sees the match in the list with object-form artifacts**
 
 ```bash
-curl -s -H "Authorization: Bearer $OWNER" "$API/gradient-sports/matches" | python -m json.tool
+curl -s -H "Authorization: Bearer $OWNER" "$API/gradientsports/matches" | python -m json.tool
 ```
 
 Expected: 1 match entry with `"id": "$GRADIENT_SMOKE_MATCH_ID"`, `"visibility": "private"`, and `"artifacts"` as an object like `{"metadata": "metadata.json", "events": "events.json", "roster": "roster.json", "tracking": "tracking.jsonl.bz2"}`. Also has `"updated_at"` ending in `Z`.
@@ -4052,7 +4052,7 @@ Expected: 64 matches uploaded, players catalogue uploaded (canonical-JSON normal
 ```bash
 API=$(cd terraform/environments/dev && terraform output -raw api_url)
 OWNER=$(aws ssm get-parameter --name "/pining-for-the-data/api_token_owner" --with-decryption --query 'Parameter.Value' --output text)
-curl -s -H "Authorization: Bearer $OWNER" "$API/gradient-sports/matches" | python -c "import sys, json; print(len(json.load(sys.stdin)['matches']))"
+curl -s -H "Authorization: Bearer $OWNER" "$API/gradientsports/matches" | python -c "import sys, json; print(len(json.load(sys.stdin)['matches']))"
 ```
 
 Expected: `67`.
@@ -4060,17 +4060,17 @@ Expected: `67`.
 - [ ] **Step 3: Verify owner token sees the player catalogue**
 
 ```bash
-curl -s -H "Authorization: Bearer $OWNER" "$API/gradient-sports/players" | python -c "import sys, json; print(len(json.load(sys.stdin)['players']))"
+curl -s -H "Authorization: Bearer $OWNER" "$API/gradientsports/players" | python -c "import sys, json; print(len(json.load(sys.stdin)['players']))"
 ```
 
 Expected: `2322`.
 
-- [ ] **Step 4: Verify public token still sees zero matches and zero players for gradient-sports**
+- [ ] **Step 4: Verify public token still sees zero matches and zero players for gradientsports**
 
 ```bash
 PUB="$PUB_TOKEN"
-curl -s -H "Authorization: Bearer $PUB" "$API/gradient-sports/matches" | python -c "import sys, json; print(len(json.load(sys.stdin)['matches']))"
-curl -s -H "Authorization: Bearer $PUB" "$API/gradient-sports/players" | python -c "import sys, json; print(len(json.load(sys.stdin)['players']))"
+curl -s -H "Authorization: Bearer $PUB" "$API/gradientsports/matches" | python -c "import sys, json; print(len(json.load(sys.stdin)['matches']))"
+curl -s -H "Authorization: Bearer $PUB" "$API/gradientsports/players" | python -c "import sys, json; print(len(json.load(sys.stdin)['players']))"
 ```
 
 Expected: `0` and `0`.
@@ -4081,9 +4081,9 @@ The operator picks a player ID from the loaded catalogue at runtime — do NOT h
 
 ```bash
 # Operator picks an ID from the loaded catalogue:
-SAMPLE_PLAYER_ID=$(curl -s -H "Authorization: Bearer $OWNER" "$API/gradient-sports/players" | \
+SAMPLE_PLAYER_ID=$(curl -s -H "Authorization: Bearer $OWNER" "$API/gradientsports/players" | \
   python -c "import sys, json; print(json.load(sys.stdin)['players'][0]['id'])")
-curl -s -H "Authorization: Bearer $OWNER" "$API/gradient-sports/players/$SAMPLE_PLAYER_ID" | python -m json.tool
+curl -s -H "Authorization: Bearer $OWNER" "$API/gradientsports/players/$SAMPLE_PLAYER_ID" | python -m json.tool
 ```
 
 Expected: a player record with `firstName`, `lastName`, `nickname`, and `"visibility": "private"`.
@@ -4091,7 +4091,7 @@ Expected: a player record with `firstName`, `lastName`, `nickname`, and `"visibi
 - [ ] **Step 6: Verify public token gets 404 on the same player ID**
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/gradient-sports/players/$SAMPLE_PLAYER_ID"
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $PUB" "$API/gradientsports/players/$SAMPLE_PLAYER_ID"
 ```
 
 Expected: `404`.
@@ -4115,7 +4115,7 @@ python scripts/verify_gradient_load.py \
   --public-token "$PUB"
 ```
 
-Expected: exits 0 with a summary like `OK: 64 matches, 2322 players; 5/5 artifact spot-checks pass; 3/3 player spot-checks pass; public-tier sees 0 matches, 0 players, gradient-sports in providers list`. Exits non-zero on ANY post-condition failure (count mismatch, visibility leak, artifact 404, player record missing).
+Expected: exits 0 with a summary like `OK: 64 matches, 2322 players; 5/5 artifact spot-checks pass; 3/3 player spot-checks pass; public-tier sees 0 matches, 0 players, gradientsports in providers list`. Exits non-zero on ANY post-condition failure (count mismatch, visibility leak, artifact 404, player record missing).
 
 - [ ] **Step 9: No commit (operational task)**
 
@@ -4139,10 +4139,10 @@ Replaces manual curl smoke tests with an automated check that runs after
 scripts/upload_gradient_wc2022.py and exits non-zero on any post-condition failure.
 
 Checks (spec §8.3.1):
-  - owner-tier /gradient-sports/matches returns exactly EXPECTED_MATCH_COUNT entries
-  - owner-tier /gradient-sports/players returns exactly EXPECTED_PLAYER_COUNT entries
-  - public-tier /gradient-sports/matches and /gradient-sports/players return zero entries
-  - public-tier /providers includes 'gradient-sports' (existence is not the secret)
+  - owner-tier /gradientsports/matches returns exactly EXPECTED_MATCH_COUNT entries
+  - owner-tier /gradientsports/players returns exactly EXPECTED_PLAYER_COUNT entries
+  - public-tier /gradientsports/matches and /gradientsports/players return zero entries
+  - public-tier /providers includes 'gradientsports' (existence is not the secret)
   - 5 random match × 4 artifact owner-tier fetches return 200 + non-empty body
   - 3 specific known-good player IDs return 200 with expected fields
 """
@@ -4211,55 +4211,55 @@ def main() -> int:
 
     # 1. Owner-tier match count
     try:
-        body, _ = _get_json(args.api, "/gradient-sports/matches", args.owner_token)
+        body, _ = _get_json(args.api, "/gradientsports/matches", args.owner_token)
         n = len(body.get("matches", []))
         if n != EXPECTED_MATCH_COUNT:
-            failures.append(f"owner /gradient-sports/matches: expected {EXPECTED_MATCH_COUNT}, got {n}")
+            failures.append(f"owner /gradientsports/matches: expected {EXPECTED_MATCH_COUNT}, got {n}")
         else:
-            print(f"OK: owner /gradient-sports/matches = {n}")
+            print(f"OK: owner /gradientsports/matches = {n}")
     except Exception as e:
-        failures.append(f"owner /gradient-sports/matches: request failed: {e}")
+        failures.append(f"owner /gradientsports/matches: request failed: {e}")
         body = {"matches": []}
 
     matches = body.get("matches", [])
 
     # 2. Owner-tier player count
     try:
-        pbody, _ = _get_json(args.api, "/gradient-sports/players", args.owner_token)
+        pbody, _ = _get_json(args.api, "/gradientsports/players", args.owner_token)
         np_ = len(pbody.get("players", []))
         if np_ != EXPECTED_PLAYER_COUNT:
-            failures.append(f"owner /gradient-sports/players: expected {EXPECTED_PLAYER_COUNT}, got {np_}")
+            failures.append(f"owner /gradientsports/players: expected {EXPECTED_PLAYER_COUNT}, got {np_}")
         else:
-            print(f"OK: owner /gradient-sports/players = {np_}")
+            print(f"OK: owner /gradientsports/players = {np_}")
     except Exception as e:
-        failures.append(f"owner /gradient-sports/players: request failed: {e}")
+        failures.append(f"owner /gradientsports/players: request failed: {e}")
 
     # 3. Public-tier visibility leak checks
     try:
-        body, _ = _get_json(args.api, "/gradient-sports/matches", args.public_token)
+        body, _ = _get_json(args.api, "/gradientsports/matches", args.public_token)
         if body.get("matches"):
-            failures.append(f"VISIBILITY LEAK: public /gradient-sports/matches returned {len(body['matches'])} entries (expected 0)")
+            failures.append(f"VISIBILITY LEAK: public /gradientsports/matches returned {len(body['matches'])} entries (expected 0)")
         else:
-            print("OK: public /gradient-sports/matches = 0")
+            print("OK: public /gradientsports/matches = 0")
     except Exception as e:
-        failures.append(f"public /gradient-sports/matches: request failed: {e}")
+        failures.append(f"public /gradientsports/matches: request failed: {e}")
 
     try:
-        body, _ = _get_json(args.api, "/gradient-sports/players", args.public_token)
+        body, _ = _get_json(args.api, "/gradientsports/players", args.public_token)
         if body.get("players"):
-            failures.append(f"VISIBILITY LEAK: public /gradient-sports/players returned {len(body['players'])} entries (expected 0)")
+            failures.append(f"VISIBILITY LEAK: public /gradientsports/players returned {len(body['players'])} entries (expected 0)")
         else:
-            print("OK: public /gradient-sports/players = 0")
+            print("OK: public /gradientsports/players = 0")
     except Exception as e:
-        failures.append(f"public /gradient-sports/players: request failed: {e}")
+        failures.append(f"public /gradientsports/players: request failed: {e}")
 
-    # 4. public /providers MUST include gradient-sports (existence is not the secret; spec §4.2)
+    # 4. public /providers MUST include gradientsports (existence is not the secret; spec §4.2)
     try:
         body, _ = _get_json(args.api, "/providers", args.public_token)
-        if "gradient-sports" not in body.get("providers", []):
-            failures.append("public /providers: 'gradient-sports' missing — spec §4.2 says public tier sees all providers")
+        if "gradientsports" not in body.get("providers", []):
+            failures.append("public /providers: 'gradientsports' missing — spec §4.2 says public tier sees all providers")
         else:
-            print("OK: public /providers contains 'gradient-sports'")
+            print("OK: public /providers contains 'gradientsports'")
     except Exception as e:
         failures.append(f"public /providers: request failed: {e}")
 
@@ -4273,7 +4273,7 @@ def main() -> int:
         for artifact in ARTIFACTS_PER_MATCH:
             spot_total += 1
             try:
-                status, size = _follow_redirect(args.api, f"/gradient-sports/matches/{match_id}/{artifact}", args.owner_token)
+                status, size = _follow_redirect(args.api, f"/gradientsports/matches/{match_id}/{artifact}", args.owner_token)
                 if status == 200 and size > 0:
                     spot_pass += 1
                 else:
@@ -4287,19 +4287,19 @@ def main() -> int:
     # has an id matching the path-param regex, and at least one of nickname /
     # firstName+lastName per spec §6.3.
     try:
-        all_players_body, _ = _get_json(args.api, "/gradient-sports/players", args.owner_token)
+        all_players_body, _ = _get_json(args.api, "/gradientsports/players", args.owner_token)
         all_players = all_players_body.get("players", [])
     except Exception as e:
-        failures.append(f"owner /gradient-sports/players for spot-check: failed: {e}")
+        failures.append(f"owner /gradientsports/players for spot-check: failed: {e}")
         all_players = []
 
     sample_players = rng.sample(all_players, min(PLAYER_SPOT_CHECK_SAMPLE_SIZE, len(all_players)))
     player_pass = 0
     for p in sample_players:
         pid = p.get("id", "")
-        # Round-trip via /gradient-sports/players/{id} to confirm individual lookup works.
+        # Round-trip via /gradientsports/players/{id} to confirm individual lookup works.
         try:
-            body, _ = _get_json(args.api, f"/gradient-sports/players/{pid}", args.owner_token)
+            body, _ = _get_json(args.api, f"/gradientsports/players/{pid}", args.owner_token)
             shape_ok = (
                 isinstance(body.get("id"), str)
                 and (body.get("nickname") or (body.get("firstName") and body.get("lastName")))
@@ -4317,11 +4317,11 @@ def main() -> int:
     if matches:
         any_match = matches[0]["id"]
         any_artifact = next(iter(matches[0].get("artifacts", {}).keys()), "metadata")
-        status = _get_status(args.api, f"/gradient-sports/matches/{any_match}/{any_artifact}", args.public_token)
+        status = _get_status(args.api, f"/gradientsports/matches/{any_match}/{any_artifact}", args.public_token)
         if status != 404:
-            failures.append(f"public /gradient-sports/matches/{any_match}/{any_artifact}: expected 404, got {status}")
+            failures.append(f"public /gradientsports/matches/{any_match}/{any_artifact}: expected 404, got {status}")
         else:
-            print(f"OK: public 404 on private artifact /gradient-sports/matches/{any_match}/{any_artifact}")
+            print(f"OK: public 404 on private artifact /gradientsports/matches/{any_match}/{any_artifact}")
 
     if failures:
         print("\nFAILURES:")

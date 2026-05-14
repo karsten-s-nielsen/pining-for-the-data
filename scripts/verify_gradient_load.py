@@ -4,10 +4,10 @@ Replaces manual curl smoke tests with an automated check that runs after
 scripts/upload_gradient_wc2022.py and exits non-zero on any post-condition failure.
 
 Checks (spec §8.3.1):
-  - owner-tier /gradient-sports/matches returns exactly EXPECTED_MATCH_COUNT entries
-  - owner-tier /gradient-sports/players returns exactly EXPECTED_PLAYER_COUNT entries
-  - public-tier /gradient-sports/matches and /gradient-sports/players return zero entries
-  - public-tier /providers includes 'gradient-sports' (existence is not the secret)
+  - owner-tier /gradientsports/matches returns exactly EXPECTED_MATCH_COUNT entries
+  - owner-tier /gradientsports/players returns exactly EXPECTED_PLAYER_COUNT entries
+  - public-tier /gradientsports/matches and /gradientsports/players return zero entries
+  - public-tier /providers includes 'gradientsports' (existence is not the secret)
   - 5 random match × 4 artifact owner-tier fetches return 200 + non-empty body
   - sampled players from the live response conform to PlayerRecord canonical shape
 """
@@ -107,60 +107,60 @@ def main() -> int:
     # 1. Owner-tier match count
     body: dict = {"matches": []}
     try:
-        body, _ = _get_json(args.api, "/gradient-sports/matches", args.owner_token)
+        body, _ = _get_json(args.api, "/gradientsports/matches", args.owner_token)
         n = len(body.get("matches", []))
         if n != EXPECTED_MATCH_COUNT:
-            failures.append(f"owner /gradient-sports/matches: expected {EXPECTED_MATCH_COUNT}, got {n}")
+            failures.append(f"owner /gradientsports/matches: expected {EXPECTED_MATCH_COUNT}, got {n}")
         else:
-            print(f"OK: owner /gradient-sports/matches = {n}")
+            print(f"OK: owner /gradientsports/matches = {n}")
     except Exception as e:
-        failures.append(f"owner /gradient-sports/matches: request failed: {e}")
+        failures.append(f"owner /gradientsports/matches: request failed: {e}")
 
     matches = body.get("matches", [])
 
     # 2. Owner-tier player count
     try:
-        pbody, _ = _get_json(args.api, "/gradient-sports/players", args.owner_token)
+        pbody, _ = _get_json(args.api, "/gradientsports/players", args.owner_token)
         np_ = len(pbody.get("players", []))
         if np_ != EXPECTED_PLAYER_COUNT:
-            failures.append(f"owner /gradient-sports/players: expected {EXPECTED_PLAYER_COUNT}, got {np_}")
+            failures.append(f"owner /gradientsports/players: expected {EXPECTED_PLAYER_COUNT}, got {np_}")
         else:
-            print(f"OK: owner /gradient-sports/players = {np_}")
+            print(f"OK: owner /gradientsports/players = {np_}")
     except Exception as e:
-        failures.append(f"owner /gradient-sports/players: request failed: {e}")
+        failures.append(f"owner /gradientsports/players: request failed: {e}")
 
     # 3. Public-tier visibility leak checks
     try:
-        body, _ = _get_json(args.api, "/gradient-sports/matches", args.public_token)
+        body, _ = _get_json(args.api, "/gradientsports/matches", args.public_token)
         if body.get("matches"):
             failures.append(
-                f"VISIBILITY LEAK: public /gradient-sports/matches returned {len(body['matches'])} entries (expected 0)"
+                f"VISIBILITY LEAK: public /gradientsports/matches returned {len(body['matches'])} entries (expected 0)"
             )
         else:
-            print("OK: public /gradient-sports/matches = 0")
+            print("OK: public /gradientsports/matches = 0")
     except Exception as e:
-        failures.append(f"public /gradient-sports/matches: request failed: {e}")
+        failures.append(f"public /gradientsports/matches: request failed: {e}")
 
     try:
-        body, _ = _get_json(args.api, "/gradient-sports/players", args.public_token)
+        body, _ = _get_json(args.api, "/gradientsports/players", args.public_token)
         if body.get("players"):
             failures.append(
-                f"VISIBILITY LEAK: public /gradient-sports/players returned {len(body['players'])} entries (expected 0)"
+                f"VISIBILITY LEAK: public /gradientsports/players returned {len(body['players'])} entries (expected 0)"
             )
         else:
-            print("OK: public /gradient-sports/players = 0")
+            print("OK: public /gradientsports/players = 0")
     except Exception as e:
-        failures.append(f"public /gradient-sports/players: request failed: {e}")
+        failures.append(f"public /gradientsports/players: request failed: {e}")
 
-    # 4. public /providers MUST include gradient-sports (existence is not the secret; spec §4.2)
+    # 4. public /providers MUST include gradientsports (existence is not the secret; spec §4.2)
     try:
         body, _ = _get_json(args.api, "/providers", args.public_token)
-        if "gradient-sports" not in body.get("providers", []):
+        if "gradientsports" not in body.get("providers", []):
             failures.append(
-                "public /providers: 'gradient-sports' missing — spec §4.2 says public tier sees all providers"
+                "public /providers: 'gradientsports' missing — spec §4.2 says public tier sees all providers"
             )
         else:
-            print("OK: public /providers contains 'gradient-sports'")
+            print("OK: public /providers contains 'gradientsports'")
     except Exception as e:
         failures.append(f"public /providers: request failed: {e}")
 
@@ -174,7 +174,7 @@ def main() -> int:
         for artifact in ARTIFACTS_PER_MATCH:
             spot_total += 1
             try:
-                path = f"/gradient-sports/matches/{match_id}/{artifact}"
+                path = f"/gradientsports/matches/{match_id}/{artifact}"
                 status, size = _follow_redirect(args.api, path, args.owner_token)
                 if status == 200 and size > 0:
                     spot_pass += 1
@@ -189,10 +189,10 @@ def main() -> int:
     # has an id matching the path-param regex, and at least one of nickname /
     # firstName+lastName per spec §6.3.
     try:
-        all_players_body, _ = _get_json(args.api, "/gradient-sports/players", args.owner_token)
+        all_players_body, _ = _get_json(args.api, "/gradientsports/players", args.owner_token)
         all_players = all_players_body.get("players", [])
     except Exception as e:
-        failures.append(f"owner /gradient-sports/players for spot-check: failed: {e}")
+        failures.append(f"owner /gradientsports/players for spot-check: failed: {e}")
         all_players = []
 
     sample_players = rng.sample(all_players, min(PLAYER_SPOT_CHECK_SAMPLE_SIZE, len(all_players)))
@@ -200,7 +200,7 @@ def main() -> int:
     for p in sample_players:
         pid = p.get("id", "")
         try:
-            body, _ = _get_json(args.api, f"/gradient-sports/players/{pid}", args.owner_token)
+            body, _ = _get_json(args.api, f"/gradientsports/players/{pid}", args.owner_token)
             shape_ok = (
                 isinstance(body.get("id"), str)
                 and (body.get("nickname") or (body.get("firstName") and body.get("lastName")))
@@ -218,11 +218,11 @@ def main() -> int:
     if matches:
         any_match = matches[0]["id"]
         any_artifact = next(iter(matches[0].get("artifacts", {}).keys()), "metadata")
-        status = _get_status(args.api, f"/gradient-sports/matches/{any_match}/{any_artifact}", args.public_token)
+        status = _get_status(args.api, f"/gradientsports/matches/{any_match}/{any_artifact}", args.public_token)
         if status != 404:
-            failures.append(f"public /gradient-sports/matches/{any_match}/{any_artifact}: expected 404, got {status}")
+            failures.append(f"public /gradientsports/matches/{any_match}/{any_artifact}: expected 404, got {status}")
         else:
-            print(f"OK: public 404 on private artifact /gradient-sports/matches/{any_match}/{any_artifact}")
+            print(f"OK: public 404 on private artifact /gradientsports/matches/{any_match}/{any_artifact}")
 
     if failures:
         print("\nFAILURES:")

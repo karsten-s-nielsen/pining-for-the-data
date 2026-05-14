@@ -207,13 +207,13 @@ class TestUploadVisibility:
         (tmp_path / "match.json").write_text("{}")
         (tmp_path / "tracking.jsonl").write_text("")
 
-        upload_game(tmp_path, "gradient-sports", "m-001", "test-bucket", visibility="private")
+        upload_game(tmp_path, "gradientsports", "m-001", "test-bucket", visibility="private")
 
         upload_keys = [c.args[2] for c in mock_s3.upload_file.call_args_list]
-        assert any(k == "gradient-sports/_private/m-001/match.json" for k in upload_keys)
+        assert any(k == "gradientsports/_private/m-001/match.json" for k in upload_keys)
 
         matches_put = next(
-            c for c in mock_s3.put_object.call_args_list if c.kwargs["Key"] == "gradient-sports/matches.json"
+            c for c in mock_s3.put_object.call_args_list if c.kwargs["Key"] == "gradientsports/matches.json"
         )
         body = json.loads(matches_put.kwargs["Body"].decode())
         entry = body["matches"][0]

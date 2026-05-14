@@ -345,27 +345,27 @@ class TestApplyFilters:
 
 
 class TestListProviders:
-    def test_public_tier_sees_gradient_sports_in_provider_list(self) -> None:
+    def test_public_tier_sees_gradientsports_in_provider_list(self) -> None:
         from list_providers import handler
 
         mock_s3 = _mock_s3()
-        body = json.dumps({"providers": ["skillcorner", "gradient-sports"]}).encode()
+        body = json.dumps({"providers": ["skillcorner", "gradientsports"]}).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         result = handler({"headers": {"authorization": "Bearer pub-tok"}}, None)
         assert result["statusCode"] == 200
-        assert "gradient-sports" in json.loads(result["body"])["providers"]
+        assert "gradientsports" in json.loads(result["body"])["providers"]
 
     def test_owner_tier_sees_same_provider_list(self) -> None:
         from list_providers import handler
 
         mock_s3 = _mock_s3()
-        body = json.dumps({"providers": ["skillcorner", "gradient-sports"]}).encode()
+        body = json.dumps({"providers": ["skillcorner", "gradientsports"]}).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         result = handler({"headers": {"authorization": "Bearer own-tok"}}, None)
         assert result["statusCode"] == 200
-        assert json.loads(result["body"])["providers"] == ["skillcorner", "gradient-sports"]
+        assert json.loads(result["body"])["providers"] == ["skillcorner", "gradientsports"]
 
     def test_rejects_no_auth(self) -> None:
         from list_providers import handler
@@ -427,7 +427,7 @@ class TestListMatches:
 
         mock_s3 = _mock_s3()
         all_private = {
-            "provider": "gradient-sports",
+            "provider": "gradientsports",
             "matches": [
                 {"id": "m-001", "artifacts": {"m": "m.json"}, "visibility": "private"},
             ],
@@ -437,7 +437,7 @@ class TestListMatches:
 
         event = {
             "headers": {"authorization": "Bearer pub-tok"},
-            "pathParameters": {"provider": "gradient-sports"},
+            "pathParameters": {"provider": "gradientsports"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 200
@@ -652,7 +652,7 @@ class TestGetArtifact:
         self._wire_matches(
             mock_s3,
             {
-                "provider": "gradient-sports",
+                "provider": "gradientsports",
                 "matches": [
                     {
                         "id": "m-001",
@@ -666,11 +666,11 @@ class TestGetArtifact:
 
         event = {
             "headers": {"authorization": "Bearer own-tok"},
-            "pathParameters": {"provider": "gradient-sports", "id": "m-001", "artifact": "metadata"},
+            "pathParameters": {"provider": "gradientsports", "id": "m-001", "artifact": "metadata"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 302
-        expected_key = "gradient-sports/_private/m-001/metadata.json"
+        expected_key = "gradientsports/_private/m-001/metadata.json"
         assert mock_s3.generate_presigned_url.call_args.kwargs["Params"]["Key"] == expected_key
         mock_s3.list_objects_v2.assert_not_called()
 
@@ -681,7 +681,7 @@ class TestGetArtifact:
         self._wire_matches(
             mock_s3,
             {
-                "provider": "gradient-sports",
+                "provider": "gradientsports",
                 "matches": [
                     {
                         "id": "m-001",
@@ -695,7 +695,7 @@ class TestGetArtifact:
 
         event = {
             "headers": {"authorization": "Bearer pub-tok"},
-            "pathParameters": {"provider": "gradient-sports", "id": "m-001", "artifact": "metadata"},
+            "pathParameters": {"provider": "gradientsports", "id": "m-001", "artifact": "metadata"},
         }
         result = handler(event, None)
         assert result["statusCode"] == 404
@@ -806,7 +806,7 @@ class TestGetArtifact:
 
 
 class _PlayersWiring:
-    def _wire(self, mock_s3, providers=("sc", "gradient-sports"), public_payload=None, private_payload=None):
+    def _wire(self, mock_s3, providers=("sc", "gradientsports"), public_payload=None, private_payload=None):
         mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
         providers_body = json.dumps({"providers": list(providers)}).encode()
 
@@ -873,7 +873,7 @@ class TestListPlayers(_PlayersWiring):
         from list_players import handler
 
         mock_s3 = _mock_s3()
-        self._wire(mock_s3, providers=("sc", "gradient-sports"))
+        self._wire(mock_s3, providers=("sc", "gradientsports"))
 
         event = {"headers": {"authorization": "Bearer pub-tok"}, "pathParameters": {"provider": "made-up"}}
         result = handler(event, None)
@@ -1046,7 +1046,7 @@ class TestGetPlayer(_PlayersWiring):
         from get_player import handler
 
         mock_s3 = _mock_s3()
-        self._wire(mock_s3, providers=("sc", "gradient-sports"))
+        self._wire(mock_s3, providers=("sc", "gradientsports"))
 
         event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "made-up", "id": "p1"}}
         result = handler(event, None)
@@ -1200,14 +1200,14 @@ class TestResponseHelpers:
 class TestSharedHelpers:
     def test_provider_known_returns_true_for_known_provider(self):
         s3 = MagicMock()
-        payload = b'{"providers":["sc","gradient-sports"]}'
+        payload = b'{"providers":["sc","gradientsports"]}'
         s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=payload))}
         assert shared.provider_known(s3, "bucket", "sc") is True
 
     def test_provider_known_returns_false_for_unknown(self):
         s3 = MagicMock()
         s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=b'{"providers":["sc"]}'))}
-        assert shared.provider_known(s3, "bucket", "gradient-sports") is False
+        assert shared.provider_known(s3, "bucket", "gradientsports") is False
 
     def test_provider_known_returns_false_on_missing_file(self):
         s3 = MagicMock()

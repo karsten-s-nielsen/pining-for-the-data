@@ -3,16 +3,23 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Creates an IAM role scoped to a specific GitHub repository so CI can
 # authenticate via short-lived OIDC tokens.  The OIDC identity provider
-# already exists (created by the luxury-lakehouse repo) and is referenced
-# as a data source — one provider per AWS account is sufficient.
+# already exists (created by the luxury-lakehouse repo); its ARN is constructed
+# deterministically from the account id — one provider per AWS account.
 # ──────────────────────────────────────────────────────────────────────────────
 
 data "aws_caller_identity" "current" {}
 
-# ── GitHub OIDC Provider (reference existing — one per AWS account) ────────
+# ── GitHub OIDC Provider ARN (constructed, not looked up) ─────────────────────
+# We build the ARN from the account id rather than resolving it by URL via the
+# `aws_iam_openid_connect_provider` data source. That lookup required
+# `iam:ListOpenIDConnectProviders`, which created a bootstrap dead-end: a
+# principal could not plan/apply this module without already holding that
+# permission (so even fixing the CI role's permissions could not be applied by
+# CI). The provider ARN form is stable and well-known, so constructing it
+# removes the data-source read and the permission dependency entirely.
 
-data "aws_iam_openid_connect_provider" "github" {
-  url = "https://token.actions.githubusercontent.com"
+locals {
+  github_oidc_provider_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"
 }
 
 # ── IAM Role for GitHub Actions ──────────────────────────────────────────────
@@ -24,7 +31,7 @@ resource "aws_iam_role" "github_actions" {
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { Federated = data.aws_iam_openid_connect_provider.github.arn }
+      Principal = { Federated = local.github_oidc_provider_arn }
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = {
@@ -120,7 +127,7 @@ resource "aws_iam_role_policy" "infrastructure_management" {
         Sid      = "IAMReadOIDCProvider"
         Effect   = "Allow"
         Action   = ["iam:GetOpenIDConnectProvider"]
-        Resource = [data.aws_iam_openid_connect_provider.github.arn]
+        Resource = [local.github_oidc_provider_arn]
       },
       # ── Lambda ───────────────────────────────────────────────────────────
       {
@@ -221,11 +228,9 @@ resource "aws_iam_role_policy" "infrastructure_management" {
 # grants in `infrastructure_management` do not cover them. Kept as a separate,
 # clearly-named inline policy so the read surface is auditable in isolation.
 #
-# NOTE: `iam:ListOpenIDConnectProviders` is required only because this module
-# looks the provider up by URL via the `aws_iam_openid_connect_provider` data
-# source. A future cleanup that constructs the ARN deterministically
-# (arn:aws:iam::<account>:oidc-provider/token.actions.githubusercontent.com)
-# removes that data-source read and lets this entry be dropped.
+# (`iam:ListOpenIDConnectProviders` was previously required here for the
+# `aws_iam_openid_connect_provider` data-source lookup; that data source has been
+# replaced by a constructed ARN, so the action is no longer needed and is dropped.)
 resource "aws_iam_role_policy" "plan_refresh_reads" {
   name = "terraform-plan-refresh-reads"
   role = aws_iam_role.github_actions.id
@@ -237,7 +242,6 @@ resource "aws_iam_role_policy" "plan_refresh_reads" {
         Sid    = "PlanRefreshReads"
         Effect = "Allow"
         Action = [
-          "iam:ListOpenIDConnectProviders",
           "ssm:DescribeParameters",
           "logs:DescribeLogGroups",
           "cloudtrail:DescribeTrails",

@@ -33,6 +33,7 @@ def load_script():
     def _load(name: str):
         path = _SCRIPTS_DIR / f"{name}.py"
         spec = importlib.util.spec_from_file_location(name, path)
+        assert spec is not None and spec.loader is not None, f"cannot load script module {name}"
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
         spec.loader.exec_module(module)

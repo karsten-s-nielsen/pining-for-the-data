@@ -5,16 +5,18 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         developer = person "Platform Developer" "Developer building ingestion adapters against the mock API"
         operator = person "Operator" "Repo owner; uploads data, manages tokens, runs orchestrator scripts"
 
-        pining = softwareSystem "pining-for-the-data" "Redistributes MIT-licensed SkillCorner tracking data via HuggingFace Hub and serves both open and operator-loaded restricted content via a two-tier mock provider API" {
+        pining = softwareSystem "pining-for-the-data" "Redistributes open tracking data (MIT SkillCorner, CC-BY IDSSE/DFL) via HuggingFace Hub and serves both open and operator-loaded restricted content via a two-tier mock provider API" {
             ingestCli = container "Ingest CLI" "Validates SkillCorner V3 match JSON + tracking JSONL" "Python 3.12+, pining-ingest"
             rosterCli = container "Roster Generator CLI" "Generates synthetic rosters with fictional identities for de-identification" "Python 3.12+, pining-generate-roster"
             deidentify = container "De-identification Engine" "Two-layer jersey-to-identity mapping using fictional name pools" "Python 3.12+"
-            formats = container "Format Handlers" "Read, write, and validate SkillCorner V3 format" "Python 3.12+, JSON/JSONL"
+            formats = container "Format Handlers" "Read/write/validate SkillCorner V3; parse IDSSE/DFL matchinformation XML for index metadata (positions/events served as-is)" "Python 3.12+, JSON/JSONL/XML"
             uploadCli = container "Upload CLI (Matches)" "Uploads game artifacts; --visibility public|private; validates against MatchEntry Pydantic model" "Python 3.12+, boto3, pining-upload"
             uploadPlayersCli = container "Upload CLI (Players)" "Canonical-JSON-only player catalogue uploads; rejects CSV with reference to Gradient Sports orchestrator" "Python 3.12+, boto3, pining-upload-players"
             publishCli = container "Publish CLI" "Pushes Parquet files and dataset cards to HuggingFace Hub" "Python 3.12+, huggingface_hub, pining-publish"
             gradientOrchestrator = container "Gradient Sports Orchestrator" "One-shot script: reshape Gradient Sports source layout, normalise CSV to canonical JSON, drive uploadCli + uploadPlayersCli for the bulk load" "Python 3.12+, scripts/upload_gradient_wc2022.py"
             verifyScript = container "Verify Script" "Post-load HTTP verification: counts, visibility-leak checks, content-agnostic spot-check sampling" "Python 3.12+, scripts/verify_gradient_load.py"
+            idsseOrchestrator = container "IDSSE Orchestrator" "One-shot script: fetch version-pinned figshare release, md5-verify against committed manifest, group DFL XML into per-match triplets, drive uploadCli (public tier)" "Python 3.12+, scripts/upload_idsse_bundesliga.py"
+            idsseVerify = container "IDSSE Verify Script" "Post-load HTTP verification: 7 matches/21 artifacts, public-tier visibility, date-filter parity, size-aware artifact checks (Range GET for large XML)" "Python 3.12+, scripts/verify_idsse_load.py"
 
             apiGateway = container "API Gateway" "REST API with bearer token auth, throttled (10 rps / 50 burst)" "AWS API Gateway HTTP API"
             lambdaProviders = container "list_providers Lambda" "Returns provider catalogue (tier-blind)" "AWS Lambda, Python 3.12"
@@ -46,6 +48,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         huggingface = softwareSystem "HuggingFace Hub" "Dataset hosting platform (Level 1 distribution)" "External"
         luxuryLakehouse = softwareSystem "luxury-lakehouse" "Serverless soccer analytics platform; consumes the mock API with the owner token" "External"
         gradientSports = softwareSystem "Gradient Sports" "Source of restricted FIFA WC 2022 dataset; operator has download access" "External"
+        idsse = softwareSystem "IDSSE / DFL Open Data" "CC-BY 4.0 Bundesliga tracking + event data (Bassek et al. 2025); version-pinned figshare release, provided with DFL/Sportec authorization" "External"
 
         analyst -> huggingface "Downloads tracking data" "load_dataset() / HTTPS"
         developer -> apiGateway "Tests ingestion adapters against the mock API" "HTTPS + public bearer token"
@@ -55,10 +58,13 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         operator -> uploadPlayersCli "Uploads player catalogue (canonical JSON)" "Shell"
         operator -> gradientOrchestrator "Bulk-loads Gradient Sports WC 2022" "Shell"
         operator -> verifyScript "Runs post-load verification" "Shell"
+        operator -> idsseOrchestrator "Bulk-loads IDSSE Bundesliga (public tier)" "Shell"
+        operator -> idsseVerify "Runs IDSSE post-load verification" "Shell"
         operator -> ssmParam "Sets owner token (out-of-band)" "aws ssm put-parameter"
 
         skillcorner -> formats "Source tracking data (git clone)" "Git LFS"
         gradientSports -> gradientOrchestrator "Source bundle (operator-downloaded copy)" "Filesystem"
+        idsse -> idsseOrchestrator "Source DFL XML (version-pinned figshare fetch, md5-verified)" "HTTPS"
 
         ingestCli -> formats "Validates match + tracking files" "Python import"
         rosterCli -> deidentify "Generates synthetic rosters" "Python import"
@@ -70,6 +76,9 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         gradientOrchestrator -> uploadCli "Drives per-match upload (visibility=private)" "subprocess / Python import"
         gradientOrchestrator -> uploadPlayersCli "Drives normalised player catalogue upload" "Python import"
         verifyScript -> apiGateway "Polls endpoints with both tokens; asserts post-conditions" "HTTPS"
+        idsseOrchestrator -> formats "Parses matchinformation XML for index metadata" "Python import"
+        idsseOrchestrator -> uploadCli "Drives per-match upload (visibility=public)" "Python import"
+        idsseVerify -> apiGateway "Polls public endpoints; asserts post-conditions (size-aware)" "HTTPS"
 
         apiGateway -> lambdaProviders "GET /v1/providers" "Lambda proxy"
         apiGateway -> lambdaMatches "GET /v1/{provider}/matches" "Lambda proxy"
@@ -145,6 +154,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
                 containerInstance publishCli
                 containerInstance gradientOrchestrator
                 containerInstance verifyScript
+                containerInstance idsseOrchestrator
+                containerInstance idsseVerify
                 containerInstance canonicalModels
                 containerInstance schemas
             }

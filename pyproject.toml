@@ -1,6 +1,6 @@
 [project]
 name = "pining-for-the-data"
-version = "0.1.0"
+version = "0.2.0"
 description = "Open soccer tracking data — redistribution, validation, and mock provider API"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -62,6 +62,11 @@ select = [
 # urllib.request to a configurable HTTPS API endpoint is the entire point (S310 false-positive);
 # Unicode × in docstring is intentional ("5 × 4 = 20 fetches")
 "scripts/verify_gradient_load.py" = ["S311", "S310", "RUF002", "RUF003"]
+# IDSSE loader/verifier: urllib.request to figshare + a configurable HTTPS API endpoint
+# is the entire point (S310 false-positive); md5 in the loader is a figshare-integrity
+# check, not a security primitive (S324). Matches verify_gradient_load.py's rationale.
+"scripts/upload_idsse_bundesliga.py" = ["S310", "S324"]
+"scripts/verify_idsse_load.py" = ["S310"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["deidentify", "formats", "publish", "mock_api", "canonical"]

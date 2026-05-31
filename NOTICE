@@ -14,3 +14,15 @@ SkillCorner Open Data
 
   The above copyright notice and this permission notice shall be included in all
   copies or substantial portions of the Software.
+
+IDSSE — Integrated spatiotemporal & event data (German Bundesliga)
+  Source dataset (version 1): https://doi.org/10.6084/m9.figshare.28196177.v1
+  License: CC-BY 4.0
+
+  Bassek, M., Rein, R., Weber, H., & Memmert, D. (2025).
+  An integrated dataset of spatiotemporal and event data in elite soccer.
+  Scientific Data, 12(1), 195. https://doi.org/10.1038/s41597-025-04505-y
+
+  Data provided with the authorization of the Deutsche Fußball Liga (DFL) and
+  Sportec Solutions, and published under CC-BY 4.0. Redistributed as-is (raw DFL
+  XML: matchinformation / events / positions), without modification.

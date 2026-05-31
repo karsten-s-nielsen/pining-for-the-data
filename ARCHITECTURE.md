@@ -88,6 +88,7 @@ Read and validate provider-specific tracking data.
 | Module | Status | Provider | Format |
 |--------|--------|----------|--------|
 | `skillcorner.py` | Implemented | SkillCorner | V3 match JSON + tracking JSONL at 10fps |
+| `idsse.py` | Implemented | IDSSE / DFL / Sportec | DFL XML (matchinformation parsed for index metadata; positions/events served as-is) |
 | `respovision.py` | Scaffolded | Respo.Vision | JSON, 3D pose, 50+ keypoints |
 | `convert.py` | Scaffolded | Cross-format | Respo.Vision 3D -> SkillCorner-equivalent 2D |
 
@@ -165,5 +166,5 @@ The mock API is designed so that `luxury-lakehouse`'s existing SkillCorner inges
 | Python version | 3.12+ | No Databricks constraint (luxury-lakehouse is pinned to 3.10) |
 | Data format | Parquet via pyarrow | Columnar, compressed, HF-native |
 | License (code) | MIT | Simple permissive — no business logic to protect |
-| License (data) | MIT | Redistributed from SkillCorner open data (MIT license) |
+| License (data) | MIT / CC-BY 4.0 | SkillCorner open data (MIT); IDSSE/DFL Bundesliga open data (CC-BY 4.0) |
 | Repo name | pining-for-the-data | Dead Parrot sketch — "pining for the fjords" Danish Easter egg |

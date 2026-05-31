@@ -12,6 +12,8 @@ This directory contains [Architecture Decision Records](https://adr.github.io/) 
 | [0004](0004-cloudtrail-data-events-on-data-bucket.md) | CloudTrail Data Events on the Data Bucket | Accepted | Audit trail for restricted content (spec §7) |
 | [0005](0005-single-bucket-multi-tier-prefix-isolation.md) | Single Bucket + Single KMS Key, Multi-Tier via Prefix Isolation | Accepted | S3 layout for tier-aware serving (spec §5.3) |
 | [0006](0006-canonical-models-outside-lambda-source.md) | Canonical Pydantic Models Live Outside the Lambda Source Directory | Accepted | Lambda runtime hardening; emerged at deploy (no spec section) |
+| [0007](0007-observability-baseline.md) | Observability Baseline and SLI/SLO Definitions | Accepted | Observability module (audit remediation) |
+| [0008](0008-role-aligned-artifact-key-vocabulary.md) | Role-Aligned Artifact-Key Vocabulary Across Providers | Accepted | IDSSE public redistribution (spec §3.1) |
 
 ## Format
 

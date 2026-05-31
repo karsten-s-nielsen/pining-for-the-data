@@ -1,0 +1,27 @@
+{
+  "version_url": "https://api.figshare.com/v2/articles/28196177/versions/1",
+  "_note": "Real public DFL ids from the CC-BY release; intentional (spec \u00a73.1). Regenerate with --write-manifest.",
+  "files": {
+    "DFL_02_01_matchinformation_DFL-COM-000001_DFL-MAT-J03WN1.xml": "37b0f85588c0acfb995fe633c7ac2e0d",
+    "DFL_02_01_matchinformation_DFL-COM-000001_DFL-MAT-J03WMX.xml": "bc5d5b21dbcf36aa30f4cd0428309f6b",
+    "DFL_02_01_matchinformation_DFL-COM-000002_DFL-MAT-J03WOH.xml": "b9710781d400dd812f62b0a6e3d7bce8",
+    "DFL_02_01_matchinformation_DFL-COM-000002_DFL-MAT-J03WR9.xml": "5e2d580d3d8ed97e32959de90d04992b",
+    "DFL_02_01_matchinformation_DFL-COM-000002_DFL-MAT-J03WPY.xml": "65a4568e4f374af94d3c1015cbc7c4f5",
+    "DFL_02_01_matchinformation_DFL-COM-000002_DFL-MAT-J03WQQ.xml": "5979209af316a914ce57347d0633df6c",
+    "DFL_02_01_matchinformation_DFL-COM-000002_DFL-MAT-J03WOY.xml": "7b021e577fca917a63111d55cc29ae5b",
+    "DFL_03_02_events_raw_DFL-COM-000001_DFL-MAT-J03WMX.xml": "2d88e180a1f63c7e4157feb980fc7255",
+    "DFL_03_02_events_raw_DFL-COM-000001_DFL-MAT-J03WN1.xml": "83e8ed7ea8e8ebbbdc61f61ac3534008",
+    "DFL_03_02_events_raw_DFL-COM-000002_DFL-MAT-J03WOH.xml": "ab66e51512f39d06f49f27dd3b4c2f40",
+    "DFL_03_02_events_raw_DFL-COM-000002_DFL-MAT-J03WOY.xml": "64b1be01d6ff6848168efebd56f344b9",
+    "DFL_03_02_events_raw_DFL-COM-000002_DFL-MAT-J03WPY.xml": "f68482441d38723d69f244f896482803",
+    "DFL_03_02_events_raw_DFL-COM-000002_DFL-MAT-J03WQQ.xml": "b7e9d82af4034539d802319be6c57776",
+    "DFL_03_02_events_raw_DFL-COM-000002_DFL-MAT-J03WR9.xml": "c13bc5efa5eca4a022cc678210b87d5f",
+    "DFL_04_03_positions_raw_observed_DFL-COM-000001_DFL-MAT-J03WMX.xml": "e4273a2adf5dbd9d4ec42def2f01905c",
+    "DFL_04_03_positions_raw_observed_DFL-COM-000001_DFL-MAT-J03WN1.xml": "bacb2f609c1d1b0bfc906f6b9d4109f2",
+    "DFL_04_03_positions_raw_observed_DFL-COM-000002_DFL-MAT-J03WOH.xml": "3efff25a86a61768e7d253b4bba137a3",
+    "DFL_04_03_positions_raw_observed_DFL-COM-000002_DFL-MAT-J03WOY.xml": "4e1063e0a0ae499920cf68ac1aa3ab4e",
+    "DFL_04_03_positions_raw_observed_DFL-COM-000002_DFL-MAT-J03WPY.xml": "e56ff1336a334f8da51110fbe7cab764",
+    "DFL_04_03_positions_raw_observed_DFL-COM-000002_DFL-MAT-J03WQQ.xml": "9105bad987191d3c3c362c1fce9a4fcd",
+    "DFL_04_03_positions_raw_observed_DFL-COM-000002_DFL-MAT-J03WR9.xml": "e060bb7d7a5a3bfbd15bbf9bc631024d"
+  }
+}

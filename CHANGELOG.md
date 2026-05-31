@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-29
+
 ### Removed
 - `get_artifact` legacy array-form fallback (and its 2 regression tests). All deployed `matches.json` entries are now in canonical object form, so the dead code path is gone.
 
@@ -13,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - 10 SkillCorner matches in `skillcorner/matches.json` migrated from legacy array-form `artifacts: ["..."]` to canonical object-form `artifacts: {name: filename}`, `visibility: "public"` and `updated_at` added, `source.license` (American) renamed to `source.licence` (British, per spec §8.2.1). One-shot script `scripts/backfill_skillcorner_artifacts.py` is idempotent and uses S3 `IfMatch=<etag>` for optimistic concurrency control.
 
 ### Added
+- IDSSE/Sportec open Bundesliga as a new **public** provider (`idsse`): 7 matches of raw DFL XML (matchinformation / events / positions at 25 fps), redistributed as-is under CC-BY 4.0 with DFL/Sportec authorization, served through the existing provider API. New `src/formats/idsse.py` reader parses only the ~12 KB matchinformation XML for index metadata (`date` derived in `Europe/Berlin` local time); positions/events are served byte-for-byte. `scripts/upload_idsse_bundesliga.py` fetches the version-pinned figshare release (`/versions/1`), verifies it against a committed md5 manifest (`scripts/idsse_figshare_manifest.json`, regenerable via `--write-manifest`), and bulk-loads via `pining-upload`. `scripts/verify_idsse_load.py` runs size-aware post-load checks (full GET for `metadata`, `Range: bytes=0-0` GET for the large `events`/`tracking`). Role-aligned artifact keys `metadata` / `events` / `tracking` (ADR 0008).
+- ADR 0008 — role-aligned artifact-key vocabulary across providers (`metadata`/`events`/`tracking`; SkillCorner's id-prefixed keys documented as the legacy exception).
 - Two-tier auth on the mock provider API: PUBLIC tier (existing `api_token`) and OWNER tier (SSM Parameter Store SecureString). `validate_token` returns a `Tier` enum; tier mismatch returns uniform `404` to avoid existence leaks (no 403). Duplicate-token misconfiguration classifies as PUBLIC (fail closed).
 - Match-level visibility flag (`public` / `private`) with reserved `_private/` S3 prefix for tier separation (defense in depth alongside the application-layer tier check).
 - New `/v1/{provider}/players` and `/v1/{provider}/players/{id}` reference resource endpoints, with provider-gated 404 and private-wins precedence on cross-tier ID collision.
@@ -30,8 +34,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - Documentation: README, ARCHITECTURE.md, CLAUDE.md, and docs/api-reference.md updated to reflect the new two-tier auth, `/players` resource, audit logging, and infrastructure additions.
-- Test count: 64 → 166.
-- C4 architecture diagram regenerated to include the new Lambdas, audit module, SSM Parameter Store, KMS, and the `canonical/` package.
+- Test count: 64 → 187.
+- C4 architecture diagram regenerated to include the new Lambdas, audit module, SSM Parameter Store, KMS, the `canonical/` package, and the IDSSE provider (orchestrator + verify script + external source).
 
 ### Fixed (deploy-time hardening)
 - `get_artifact` accepts both legacy array-form `artifacts: [...]` and current object-form `artifacts: {name: filename}`. Legacy entries (uploaded pre-Task-8) fall back to per-request S3 list; object-form entries skip listing entirely. Two regression tests cover the legacy path so it doesn't bit-rot.
@@ -43,6 +47,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Operational milestones (this branch)
 - Dev stack deployed end-to-end: SSM owner token set, audit module + CloudTrail provisioned, all 6 Lambdas live (5 data-tier with both tokens + unauthenticated health).
 - Gradient Sports FIFA WC 2022 successfully bulk-loaded into the private tier: 64 matches (256 artifact files) + 829 unique player records. `scripts/verify_gradient_load.py` post-conditions all pass: counts correct, zero visibility leaks, 20/20 artifact downloads via presigned URLs, 5/5 player spot-checks, public-tier 404 on private artifacts.
+- IDSSE Bundesliga bulk-loaded into the **public** tier on dev: 7 matches (21 artifacts, ~2.63 GB). `scripts/verify_idsse_load.py` post-conditions all pass: 7 matches, `/providers` includes `idsse`, `dateFrom`/`dateTo` filter parity, and size-aware artifact checks (`metadata` 200 + body; `events`/`tracking` 206 + positive `Content-Range` total without downloading the 418 MB positions XML).
 
 ## [0.1.0] - 2026-03-20
 
@@ -57,5 +62,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ARCHITECTURE.md with C4 diagrams
 - CI pipeline (ruff, pyright, pytest) via GitHub Actions
 
-[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/releases/tag/v0.1.0

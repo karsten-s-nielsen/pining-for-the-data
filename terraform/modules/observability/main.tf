@@ -105,7 +105,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         height = 6
         properties = {
           title  = "API Gateway Requests"
-          region = data.aws_region.current.name
+          region = data.aws_region.current.region
           metrics = [
             ["AWS/ApiGateway", "Count", "ApiId", var.api_gateway_id, { stat = "Sum", period = 300 }],
             ["AWS/ApiGateway", "5xx", "ApiId", var.api_gateway_id, { stat = "Sum", period = 300 }],
@@ -122,7 +122,7 @@ resource "aws_cloudwatch_dashboard" "main" {
           height = 6
           properties = {
             title  = "API Gateway Latency"
-            region = data.aws_region.current.name
+            region = data.aws_region.current.region
             metrics = [
               ["AWS/ApiGateway", "Latency", "ApiId", var.api_gateway_id, { stat = "p99", period = 300 }],
               ["AWS/ApiGateway", "Latency", "ApiId", var.api_gateway_id, { stat = "p50", period = 300 }],
@@ -138,7 +138,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         height = 6
         properties = {
           title  = fn
-          region = data.aws_region.current.name
+          region = data.aws_region.current.region
           metrics = [
             ["AWS/Lambda", "Invocations", "FunctionName", fn, { stat = "Sum", period = 300 }],
             ["AWS/Lambda", "Errors", "FunctionName", fn, { stat = "Sum", period = 300 }],

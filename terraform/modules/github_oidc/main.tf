@@ -213,3 +213,46 @@ resource "aws_iam_role_policy" "infrastructure_management" {
     ]
   })
 }
+
+# ── Permissions: Terraform plan-refresh reads ─────────────────────────────────
+# `terraform plan` refreshes existing state on every PR. Several of those reads
+# are account-level list/describe actions that AWS only authorizes at
+# Resource "*" (they have no per-resource ARN form), so the resource-scoped
+# grants in `infrastructure_management` do not cover them. Kept as a separate,
+# clearly-named inline policy so the read surface is auditable in isolation.
+#
+# NOTE: `iam:ListOpenIDConnectProviders` is required only because this module
+# looks the provider up by URL via the `aws_iam_openid_connect_provider` data
+# source. A future cleanup that constructs the ARN deterministically
+# (arn:aws:iam::<account>:oidc-provider/token.actions.githubusercontent.com)
+# removes that data-source read and lets this entry be dropped.
+resource "aws_iam_role_policy" "plan_refresh_reads" {
+  name = "terraform-plan-refresh-reads"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "PlanRefreshReads"
+        Effect = "Allow"
+        Action = [
+          "iam:ListOpenIDConnectProviders",
+          "ssm:DescribeParameters",
+          "logs:DescribeLogGroups",
+          "cloudtrail:DescribeTrails",
+        ]
+        Resource = ["*"]
+      },
+      {
+        Sid    = "APIGatewayRead"
+        Effect = "Allow"
+        Action = ["apigateway:GET"]
+        Resource = [
+          "arn:aws:apigateway:*::/apis",
+          "arn:aws:apigateway:*::/apis/*",
+        ]
+      }
+    ]
+  })
+}

@@ -34,6 +34,8 @@ The end result is clean, highly structured, and open-source soccer tracking data
 
 > **Note:** SkillCorner open data is redistributed as-is under its MIT license — no de-identification is applied. See [`NOTICE`](NOTICE) for attribution. The de-identification system is reserved for future private data sources.
 
+> **Public provider `idsse`:** IDSSE/Sportec open Bundesliga — 7 matches of raw DFL XML (25 fps), redistributed as-is under CC-BY 4.0. Artifacts: `metadata`, `events`, `tracking` (the DFL matchinformation / events_raw / positions_raw_observed files respectively). Source: Bassek et al. (2025), provided with DFL/Sportec authorization ([figshare v1](https://doi.org/10.6084/m9.figshare.28196177.v1)). See [`NOTICE`](NOTICE) for the full citation.
+
 The data isn't dead. It's just resting.
 
 ## Key Features
@@ -221,8 +223,10 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for development setup, coding standards
 
 Code: [MIT](LICENSE)
 Redistributed SkillCorner data: [MIT](NOTICE)
+Redistributed IDSSE/Sportec Bundesliga data: [CC-BY 4.0](NOTICE)
 
 ## See Also
 
 - [luxury-lakehouse](https://github.com/karsten-s-nielsen/luxury-lakehouse) &mdash; the main analytics platform that ingests this data
 - [SkillCorner open data](https://github.com/SkillCorner/opendata) &mdash; source tracking data (MIT license)
+- [IDSSE open dataset](https://doi.org/10.6084/m9.figshare.28196177.v1) &mdash; Bassek et al. (2025), Bundesliga tracking + event data (CC-BY 4.0, DFL/Sportec)

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<PutDataRequest RequestId="SYN-REQ-0001" MessageTime="2099-01-01T00:00:00.000+00:00" TransmissionComplete="true">
+  <MatchInformation>
+    <General TypeOfSport="Fußball" CompetitionName="Synthetic League" CompetitionId="DFL-COM-000099"
+             MatchDay="1" Season="2099/2100" SeasonId="DFL-SEA-SYN001"
+             PlannedKickoffTime="2099-08-15T18:30:00.000+00:00" KickoffTime="2099-08-15T18:31:00.000+00:00"
+             MatchId="DFL-MAT-SYN001" MatchTitle="Test Home FC:Test Away FC"
+             HomeTeamName="Test Home FC" HomeTeamId="DFL-CLU-SYN0H"
+             GuestTeamName="Test Away FC" GuestTeamId="DFL-CLU-SYN0G" Result="0:0" />
+    <Teams/>
+  </MatchInformation>
+</PutDataRequest>

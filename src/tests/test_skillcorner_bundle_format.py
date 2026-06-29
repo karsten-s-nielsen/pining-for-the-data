@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,7 @@ from formats.skillcorner_bundle import (
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def _make_bundle(root: Path, match_id: str, *, drop: set[str] = frozenset()) -> None:
+def _make_bundle(root: Path, match_id: str, *, drop: Collection[str] = ()) -> None:
     """Create a synthetic bundle tree with the 5 artifact subdirs for one match.
 
     `drop` names role keys whose source file should be omitted (to test completeness).

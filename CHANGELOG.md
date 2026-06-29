@@ -20,6 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Test count: 187 → 210 (+24 new unit tests; synthetic fixtures only).
 - Documentation: README (owner-tier note), CLAUDE.md (new reader + scripts), and the ADR index updated.
 
+### Security
+- Bumped transitive `pip-audit` tooling deps to clear newly-disclosed advisories: `msgpack` 1.1.2 → 1.2.1 (GHSA-6v7p-g79w-8964, via `cachecontrol`) and `pip` 26.1.1 → 26.1.2 (PYSEC-2026-196, via `pip_api`).
+
 ## [0.2.0] - 2026-05-29
 
 ### Removed

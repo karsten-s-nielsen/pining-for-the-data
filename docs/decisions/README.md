@@ -14,6 +14,7 @@ This directory contains [Architecture Decision Records](https://adr.github.io/) 
 | [0006](0006-canonical-models-outside-lambda-source.md) | Canonical Pydantic Models Live Outside the Lambda Source Directory | Accepted | Lambda runtime hardening; emerged at deploy (no spec section) |
 | [0007](0007-observability-baseline.md) | Observability Baseline and SLI/SLO Definitions | Accepted | Observability module (audit remediation) |
 | [0008](0008-role-aligned-artifact-key-vocabulary.md) | Role-Aligned Artifact-Key Vocabulary Across Providers | Accepted | IDSSE public redistribution (spec §3.1) |
+| [0009](0009-restricted-tier-under-existing-public-provider.md) | Restricted Data Under an Existing Public Provider | Accepted | SkillCorner RM owner-tier ingest (spec §13) |
 
 ## Format
 

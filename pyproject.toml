@@ -1,6 +1,6 @@
 [project]
 name = "pining-for-the-data"
-version = "0.2.0"
+version = "0.3.0"
 description = "Open soccer tracking data — redistribution, validation, and mock provider API"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -67,6 +67,8 @@ select = [
 # check, not a security primitive (S324). Matches verify_gradient_load.py's rationale.
 "scripts/upload_idsse_bundesliga.py" = ["S310", "S324"]
 "scripts/verify_idsse_load.py" = ["S310"]
+# Verifier: urllib.request to a configurable HTTPS API endpoint is the entire point (S310 false-positive).
+"scripts/verify_skillcorner_realmadrid_load.py" = ["S310"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["deidentify", "formats", "publish", "mock_api", "canonical"]

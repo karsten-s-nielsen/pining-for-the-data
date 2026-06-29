@@ -6,13 +6,13 @@ Companion repo to luxury-lakehouse.
 ## Architecture
 
 - `src/deidentify/` — name pools, roster generation, two-layer jersey→identity mapping
-- `src/formats/` — provider format readers/writers (SkillCorner V3 JSON/JSONL, IDSSE/Sportec DFL XML, Respo.Vision JSON future)
+- `src/formats/` — provider format readers/writers (SkillCorner V3 JSON/JSONL, SkillCorner multi-artifact bundle for restricted owner-tier data, IDSSE/Sportec DFL XML, Respo.Vision JSON future)
 - `src/publish/` — HuggingFace Hub dataset publishing
 - `src/mock_api/` — Upload CLIs (pining-upload, pining-upload-players)
 - `src/tests/` — pytest test suite
 - `schemas/` — Published JSON Schemas for `matches.json` and `players.json` (generated from Pydantic models in `src/canonical/models.py`; drift-tested in CI; models kept out of the Lambda zip so the runtime stays pydantic-free)
 - `src/canonical/` — Canonical Pydantic models (`MatchEntry`, `PlayerRecord`); imported by upload CLIs + schema regenerator + tests
-- `scripts/` — One-shot ops scripts (regenerate_schemas.py, upload_gradient_wc2022.py, verify_gradient_load.py, upload_idsse_bundesliga.py, verify_idsse_load.py)
+- `scripts/` — One-shot ops scripts (regenerate_schemas.py, upload_gradient_wc2022.py, verify_gradient_load.py, upload_idsse_bundesliga.py, verify_idsse_load.py, upload_skillcorner_realmadrid.py, verify_skillcorner_realmadrid_load.py)
 - `name_pools/` — JSON name lists (fictional first/last names, cities)
 - `rosters/` — generated de-identified roster JSONs per game
 - `terraform/` — AWS infrastructure (S3 + API Gateway + Lambda + SSM + KMS + CloudTrail)

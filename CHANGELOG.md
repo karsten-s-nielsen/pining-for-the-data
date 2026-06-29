@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-29
+
+### Added
+- Restricted SkillCorner Real Madrid tracking data ingested as **owner-tier** content under the existing `skillcorner` provider (`visibility="private"`, `provenance="original"`) — served only to the owner bearer token; public consumers see only the redistributed open data. No new provider slug and no Lambda/Terraform change (the API is already tier/provider-generic).
+- `src/formats/skillcorner_bundle.py` — pure, stdlib-only reader for the SkillCorner multi-artifact bundle (Soccermatics-course distribution). Parses only the small `meta/*.json` for index metadata (`date` derived in `Europe/Madrid` local time) and derives the owner-tier player catalogue from the self-contained `meta.players` lists; the large tracking/events/freeze/physical bodies are never parsed.
+- Role-aligned artifact keys `tracking` / `events` / `freeze_frames` / `metadata` / `physical` (ADR 0008); `freeze_frames` and `physical` registered in the shared role vocabulary. `tracking` JSON is gzip-compressed (streamed) before upload; the reproducible `velocities` artifact is excluded.
+- `scripts/upload_skillcorner_realmadrid.py` — owner-tier worked adapter: stages each match's artifacts into a fresh temp dir, calls `pining-upload` at the private tier, then derives + uploads the player catalogue, **skipping (and reporting) any player id already present in the public tier** so a cross-tier collision never aborts the load. Source root read from `$SKILLCORNER_RESTRICTED_DIR`.
+- `scripts/verify_skillcorner_realmadrid_load.py` — owner+public post-load verification: owner sees the restricted matches/artifacts/players, public gets a uniform `404` (no existence leak), large `tracking` validated via a `Range: bytes=0-0` GET. Identifiers sampled from the live response (no licensed ids committed).
+- ADR 0009 — restricted data under an existing public provider (tier dimension over a new slug; `meta`-as-index-source over the mismatched `matches.parquet`; cross-tier player-collision skip-and-report).
+
+### Changed
+- Test count: 187 → 210 (+24 new unit tests; synthetic fixtures only).
+- Documentation: README (owner-tier note), CLAUDE.md (new reader + scripts), and the ADR index updated.
+
+### Security
+- Bumped transitive `pip-audit` tooling deps to clear newly-disclosed advisories: `msgpack` 1.1.2 → 1.2.1 (GHSA-6v7p-g79w-8964, via `cachecontrol`) and `pip` 26.1.1 → 26.1.2 (PYSEC-2026-196, via `pip_api`).
+
 ## [0.2.0] - 2026-05-29
 
 ### Removed
@@ -62,6 +79,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ARCHITECTURE.md with C4 diagrams
 - CI pipeline (ruff, pyright, pytest) via GitHub Actions
 
-[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/releases/tag/v0.1.0

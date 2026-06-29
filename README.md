@@ -36,6 +36,8 @@ The end result is clean, highly structured, and open-source soccer tracking data
 
 > **Public provider `idsse`:** IDSSE/Sportec open Bundesliga — 7 matches of raw DFL XML (25 fps), redistributed as-is under CC-BY 4.0. Artifacts: `metadata`, `events`, `tracking` (the DFL matchinformation / events_raw / positions_raw_observed files respectively). Source: Bassek et al. (2025), provided with DFL/Sportec authorization ([figshare v1](https://doi.org/10.6084/m9.figshare.28196177.v1)). See [`NOTICE`](NOTICE) for the full citation.
 
+> **Owner tier on `skillcorner`:** beyond the public open data, the `skillcorner` provider also carries **restricted** matches served only to the owner bearer token (`visibility=private`); public consumers see only the redistributed open data. These artifacts use role-aligned keys (`tracking`, `events`, `freeze_frames`, `metadata`, `physical`). Restricted data is access-gated, never redistributed. See [ADR 0009](docs/decisions/0009-restricted-tier-under-existing-public-provider.md).
+
 The data isn't dead. It's just resting.
 
 ## Key Features

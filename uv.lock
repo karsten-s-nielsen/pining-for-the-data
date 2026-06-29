@@ -724,7 +724,7 @@ wheels = [
 
 [[package]]
 name = "pining-for-the-data"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },

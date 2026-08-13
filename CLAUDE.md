@@ -6,13 +6,17 @@ Companion repo to luxury-lakehouse.
 ## Architecture
 
 - `src/deidentify/` — name pools, roster generation, two-layer jersey→identity mapping
-- `src/formats/` — provider format readers/writers (SkillCorner V3 JSON/JSONL, SkillCorner multi-artifact bundle for restricted owner-tier data, IDSSE/Sportec DFL XML, Respo.Vision JSON future)
+- `src/formats/` — provider format readers/writers (SkillCorner V3 JSON/JSONL, SkillCorner multi-artifact bundle for restricted owner-tier data, IDSSE/Sportec DFL XML, StatsBomb commercial 360 club bundle for restricted owner-tier data, Respo.Vision JSON future)
 - `src/publish/` — HuggingFace Hub dataset publishing
 - `src/mock_api/` — Upload CLIs (pining-upload, pining-upload-players)
 - `src/tests/` — pytest test suite
 - `schemas/` — Published JSON Schemas for `matches.json` and `players.json` (generated from Pydantic models in `src/canonical/models.py`; drift-tested in CI; models kept out of the Lambda zip so the runtime stays pydantic-free)
 - `src/canonical/` — Canonical Pydantic models (`MatchEntry`, `PlayerRecord`); imported by upload CLIs + schema regenerator + tests
-- `scripts/` — One-shot ops scripts (regenerate_schemas.py, upload_gradient_wc2022.py, verify_gradient_load.py, upload_idsse_bundesliga.py, verify_idsse_load.py, upload_skillcorner_realmadrid.py, verify_skillcorner_realmadrid_load.py)
+- `scripts/` — One-shot ops scripts, grouped by role:
+  - Per-provider load + post-load verify pairs: `upload_gradient_wc2022.py` / `verify_gradient_load.py`, `upload_idsse_bundesliga.py` / `verify_idsse_load.py`, `upload_skillcorner_realmadrid.py` / `verify_skillcorner_realmadrid_load.py`, `upload_statsbomb_club.py` / `verify_statsbomb_load.py`
+  - Shared: `_verify_http.py` (HTTP helpers the verify scripts import), `regenerate_schemas.py` (drift-tested in CI)
+  - Completed one-shot migrations against live S3 state, retained as the audit trail for changes already applied (each is idempotent and safe to re-run): `backfill_skillcorner_artifacts.py` (legacy array-form artifacts → canonical object form), `migrate_pff_to_gradientsports.py` and `migrate_gradientsports_slug.py` (the two provider-slug renames)
+  - Data: `idsse_figshare_manifest.json` (committed md5 manifest for the pinned figshare release)
 - `name_pools/` — JSON name lists (fictional first/last names, cities)
 - `rosters/` — generated de-identified roster JSONs per game
 - `terraform/` — AWS infrastructure (S3 + API Gateway + Lambda + SSM + KMS + CloudTrail)
@@ -57,6 +61,9 @@ The mock API serves two visibility tiers:
 
 - **Public tier**: documented `api_token` in `terraform.tfvars`. Serves redistributed open data (e.g., SkillCorner).
 - **Owner tier**: bearer token stored in SSM Parameter Store SecureString (`/pining-for-the-data/api_token_owner`). Serves restricted private-tier content (e.g., Gradient Sports). Set out-of-band via `aws ssm put-parameter`; never committed.
+
+Owner-tier providers: `gradientsports` (Gradient Sports), `skillcorner` private tier
+(restricted Real Madrid), `statsbomb` (commercial 360 club delivery — ADR 0010).
 
 `validate_token` (in `terraform/modules/functions/src/shared.py`) returns a `Tier` enum (`PUBLIC` or `OWNER`); handlers filter responses by tier. Tier mismatch returns uniform `404` (not `403`) to avoid existence leaks. Duplicate-token misconfiguration classifies as `PUBLIC` (fail closed).
 

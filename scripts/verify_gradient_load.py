@@ -10,18 +10,24 @@ Checks (spec §8.3.1):
   - public-tier /providers includes 'gradientsports' (existence is not the secret)
   - 5 random match × 4 artifact owner-tier fetches return 200 + non-empty body
   - sampled players from the live response conform to PlayerRecord canonical shape
+
+Shares scripts/_verify_http.py with the other verify scripts — including NoFollow,
+which exists because urllib would otherwise forward the bearer token to presigned S3.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import random
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
-from typing import Any
+from pathlib import Path
+
+# scripts/ is not a package — make the sibling helper module importable when run directly.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _verify_http import NoFollow, get_json_with_status
 
 EXPECTED_MATCH_COUNT = 64  # FIFA WC 2022: 48 group-stage + 16 knockout matches
 # Unique player IDs after dedup. Gradient Sports CSV has ~2321 (player, team) rows;
@@ -33,15 +39,6 @@ ARTIFACTS_PER_MATCH = ["metadata", "events", "roster", "tracking"]
 # DO NOT hardcode (provider_id → name) tuples here — those are the licensed
 # mapping the spec §8.3 redistribution-licence gate exists to protect.
 # Spot-checks instead sample from the live response and validate shape only.
-
-
-def _get_json(api: str, path: str, token: str) -> tuple[Any, int]:
-    req = urllib.request.Request(
-        f"{api}{path}",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8")), resp.status
 
 
 def _follow_redirect(api: str, path: str, token: str) -> tuple[int, int]:
@@ -59,11 +56,7 @@ def _follow_redirect(api: str, path: str, token: str) -> tuple[int, int]:
         headers={"Authorization": f"Bearer {token}"},
     )
 
-    class _NoFollow(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            return None  # disable auto-follow
-
-    opener = urllib.request.build_opener(_NoFollow)
+    opener = urllib.request.build_opener(NoFollow)
     try:
         with opener.open(api_req, timeout=30) as resp:
             # Shouldn't get here for a 302 path, but handle direct 200 just in case.
@@ -107,7 +100,7 @@ def main() -> int:
     # 1. Owner-tier match count
     body: dict = {"matches": []}
     try:
-        body, _ = _get_json(args.api, "/gradientsports/matches", args.owner_token)
+        body, _ = get_json_with_status(args.api, "/gradientsports/matches", args.owner_token)
         n = len(body.get("matches", []))
         if n != EXPECTED_MATCH_COUNT:
             failures.append(f"owner /gradientsports/matches: expected {EXPECTED_MATCH_COUNT}, got {n}")
@@ -120,7 +113,7 @@ def main() -> int:
 
     # 2. Owner-tier player count
     try:
-        pbody, _ = _get_json(args.api, "/gradientsports/players", args.owner_token)
+        pbody, _ = get_json_with_status(args.api, "/gradientsports/players", args.owner_token)
         np_ = len(pbody.get("players", []))
         if np_ != EXPECTED_PLAYER_COUNT:
             failures.append(f"owner /gradientsports/players: expected {EXPECTED_PLAYER_COUNT}, got {np_}")
@@ -131,7 +124,7 @@ def main() -> int:
 
     # 3. Public-tier visibility leak checks
     try:
-        body, _ = _get_json(args.api, "/gradientsports/matches", args.public_token)
+        body, _ = get_json_with_status(args.api, "/gradientsports/matches", args.public_token)
         if body.get("matches"):
             failures.append(
                 f"VISIBILITY LEAK: public /gradientsports/matches returned {len(body['matches'])} entries (expected 0)"
@@ -142,7 +135,7 @@ def main() -> int:
         failures.append(f"public /gradientsports/matches: request failed: {e}")
 
     try:
-        body, _ = _get_json(args.api, "/gradientsports/players", args.public_token)
+        body, _ = get_json_with_status(args.api, "/gradientsports/players", args.public_token)
         if body.get("players"):
             failures.append(
                 f"VISIBILITY LEAK: public /gradientsports/players returned {len(body['players'])} entries (expected 0)"
@@ -154,7 +147,7 @@ def main() -> int:
 
     # 4. public /providers MUST include gradientsports (existence is not the secret; spec §4.2)
     try:
-        body, _ = _get_json(args.api, "/providers", args.public_token)
+        body, _ = get_json_with_status(args.api, "/providers", args.public_token)
         if "gradientsports" not in body.get("providers", []):
             failures.append(
                 "public /providers: 'gradientsports' missing — spec §4.2 says public tier sees all providers"
@@ -189,7 +182,7 @@ def main() -> int:
     # has an id matching the path-param regex, and at least one of nickname /
     # firstName+lastName per spec §6.3.
     try:
-        all_players_body, _ = _get_json(args.api, "/gradientsports/players", args.owner_token)
+        all_players_body, _ = get_json_with_status(args.api, "/gradientsports/players", args.owner_token)
         all_players = all_players_body.get("players", [])
     except Exception as e:
         failures.append(f"owner /gradientsports/players for spot-check: failed: {e}")
@@ -200,7 +193,7 @@ def main() -> int:
     for p in sample_players:
         pid = p.get("id", "")
         try:
-            body, _ = _get_json(args.api, f"/gradientsports/players/{pid}", args.owner_token)
+            body, _ = get_json_with_status(args.api, f"/gradientsports/players/{pid}", args.owner_token)
             shape_ok = (
                 isinstance(body.get("id"), str)
                 and (body.get("nickname") or (body.get("firstName") and body.get("lastName")))

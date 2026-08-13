@@ -1,57 +1,65 @@
 # Architecture — pining-for-the-data
 
-> **Status**: SkillCorner V3 format + Mock Provider API implemented.
+> **Status**: Mock Provider API implemented with two-tier auth. Four providers served — `skillcorner` (public open data + owner-tier restricted bundle), `idsse` (public), `gradientsports` (owner tier), `statsbomb` (owner tier).
 > **Repository**: [`karsten-s-nielsen/pining-for-the-data`](https://github.com/karsten-s-nielsen/pining-for-the-data)
 
 ---
 
 ## 1. Purpose
 
-Tooling and infrastructure to redistribute, validate, and publish soccer tracking data as an open dataset. SkillCorner open data (MIT license) is redistributed as-is; the project includes a de-identification engine for future use with private/commercial data. Companion to luxury-lakehouse.
+Tooling and infrastructure to validate, redistribute, and serve soccer tracking data as an open dataset — plus an owner-only tier for restricted data that cannot be redistributed. Four providers are served: `skillcorner` (MIT open data redistributed as-is, plus a restricted multi-artifact bundle on the owner tier), `idsse` (CC-BY 4.0 IDSSE/DFL Bundesliga, redistributed as-is), `gradientsports` (owner tier only), and `statsbomb` (commercial 360, owner tier only). The project also includes a de-identification engine, retained for future use with private/commercial data. Companion to luxury-lakehouse.
 
 ---
 
 ## 2. Data Flow
 
 ```
-SkillCorner Open Data (MIT) ──> match.json + tracking.jsonl (10fps)
-                                        │
-                                        ▼
-                           ┌─────────────────────┐
-                           │  pining-for-the-data │
-                           │                     │
-                           │  1. Validate format  │
-                           │  2. Redistribute     │
-                           └──────┬──────┬───────┘
-                                  │      │
-                     ┌────────────┘      └────────────┐
-                     ▼                                ▼
-           ┌──────────────────┐             ┌──────────────────┐
-           │  HuggingFace Hub │             │   AWS Mock API   │
-           │  (Level 1)       │             │   (Level 2)      │
-           │                  │             │                  │
-           │  load_dataset()  │             │  GET /v1/matches │
-           │  Zero friction   │             │  Bearer token    │
-           └──────────────────┘             └──────────────────┘
-                     │                                │
-                     └──────────┬─────────────────────┘
-                                ▼
-                     ┌──────────────────────┐
-                     │   luxury-lakehouse    │
-                     │                       │
-                     │  src/ingestion/       │
-                     │    skillcorner.py      │
-                     │    provider_framework/ │
-                     │                       │
-                     │  Same adapter code    │
-                     │  works against mock   │
-                     │  and real provider    │
-                     └──────────────────────┘
+Open data, redistributed as-is              Restricted data, owner tier only
+  skillcorner (MIT)                           skillcorner (restricted bundle)
+  idsse (CC-BY 4.0)                           gradientsports
+                                              statsbomb (commercial 360)
+          │                                                  │
+          └─────────────────────────┬────────────────────────┘
+                                    ▼
+                        ┌──────────────────────┐
+                        │  pining-for-the-data │
+                        │                      │
+                        │  1. Validate format  │
+                        │  2. Redistribute or  │
+                        │     load restricted  │
+                        └──────┬───────┬───────┘
+                               │       │
+                ┌──────────────┘       └────────────────┐
+                ▼                                       ▼
+      ┌──────────────────┐                    ┌──────────────────┐
+      │  HuggingFace Hub │                    │   AWS Mock API   │
+      │  (Level 1)       │                    │   (Level 2)      │
+      │                  │                    │                  │
+      │  load_dataset()  │                    │  GET /v1/matches │
+      │  Open data only  │                    │  Two-tier auth   │
+      └──────────────────┘                    └──────────────────┘
+                │                                       │
+                └───────────────────┬───────────────────┘
+                                    ▼
+                       ┌────────────────────────┐
+                       │    luxury-lakehouse    │
+                       │                        │
+                       │  src/ingestion/        │
+                       │    skillcorner.py      │
+                       │    provider_framework/ │
+                       │                        │
+                       │  Same adapter code     │
+                       │  works against mock    │
+                       │  and real provider     │
+                       └────────────────────────┘
 ```
 
-**Two modes:**
-- **As-is redistribution** (SkillCorner open data): validate and publish, no transformation
-- **De-identification** (future private data): full synthetic identity pipeline via RosterGenerator + TwoLayerMapping
+Only open data reaches HuggingFace Hub. The mock API serves both: the public bearer token sees open data only, the owner token sees everything.
+
+**Three modes:**
+- **As-is redistribution** (`skillcorner` open data, `idsse`): validate and publish, no transformation
+- **Access-gated serving** (restricted `skillcorner` bundle, `gradientsports`, `statsbomb`): loaded to the owner tier only, never redistributed. Small metadata files are parsed to build the index; large bodies are served as delivered, reshaped only where the source layout differs from the provider's own feed shape (ADR 0010)
+- **De-identification** (future private data): full synthetic identity pipeline via RosterGenerator + TwoLayerMapping — retained, not applied to any currently served provider
 
 ---
 
@@ -88,7 +96,9 @@ Read and validate provider-specific tracking data.
 | Module | Status | Provider | Format |
 |--------|--------|----------|--------|
 | `skillcorner.py` | Implemented | SkillCorner | V3 match JSON + tracking JSONL at 10fps |
+| `skillcorner_bundle.py` | Implemented | SkillCorner (restricted multi-artifact bundle, owner tier) | Multi-artifact bundle — only the small `meta/*.json` is parsed, for index metadata and the owner-tier player catalogue (ADR 0009); tracking/events/freeze/physical bodies served as-is |
 | `idsse.py` | Implemented | IDSSE / DFL / Sportec | DFL XML (matchinformation parsed for index metadata; positions/events served as-is) |
+| `statsbomb.py` | Implemented | StatsBomb (commercial 360, owner tier) | Club file drop — de-pivots `statsbombpy` column-orient dumps and re-nests the match row to feed shape (ADR 0010); events/frames/lineups served as-is |
 | `respovision.py` | Scaffolded | Respo.Vision | JSON, 3D pose, 50+ keypoints |
 | `convert.py` | Scaffolded | Cross-format | Respo.Vision 3D -> SkillCorner-equivalent 2D |
 
@@ -140,7 +150,7 @@ AWS (effectively $0/month at expected volume)
                                  (auth on 5 data handlers; health is unauthenticated for synthetic monitoring)
 ```
 
-Terraform modules in `terraform/`. Audit logging is provisioned via `terraform/modules/audit/`. See [setup guide](terraform/docs/setup.md) and [ADR 0001-0005](docs/decisions/) for design rationale.
+Terraform modules in `terraform/`. Audit logging is provisioned via `terraform/modules/audit/`. See [setup guide](terraform/docs/setup.md) and [ADR 0001-0010](docs/decisions/) for design rationale.
 
 ---
 

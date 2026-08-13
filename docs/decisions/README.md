@@ -15,6 +15,7 @@ This directory contains [Architecture Decision Records](https://adr.github.io/) 
 | [0007](0007-observability-baseline.md) | Observability Baseline and SLI/SLO Definitions | Accepted | Observability module (audit remediation) |
 | [0008](0008-role-aligned-artifact-key-vocabulary.md) | Role-Aligned Artifact-Key Vocabulary Across Providers | Accepted | IDSSE public redistribution (spec §3.1) |
 | [0009](0009-restricted-tier-under-existing-public-provider.md) | Restricted Data Under an Existing Public Provider | Accepted | SkillCorner RM owner-tier ingest (spec §13) |
+| [0010](0010-faithful-feed-mimicry.md) | Faithful-Feed Mimicry | Accepted | StatsBomb commercial 360 owner-tier ingest (spec §3) |
 
 ## Format
 
@@ -30,4 +31,16 @@ Sections:
 6. **Alternatives Considered** — what we rejected and why
 7. **See Also** — links to spec sections, related ADRs, implementation files
 
-ADRs are immutable once Accepted: a decision change becomes a NEW ADR (with `Superseded by` set on the original), not an edit. The Status and Consequences sections may be updated to reflect lived experience over time.
+## Immutability
+
+ADRs are immutable once Accepted: a decision **change** becomes a NEW ADR (with `Superseded by` set on the original), not an edit. The Status and Consequences sections may be updated to reflect lived experience over time.
+
+One narrow exception, because the alternative is worse. Where an ADR defines a **vocabulary or contract that later ADRs extend** — a set of allowed keys, roles, or names — a later extension may be recorded back into the defining ADR as an **`Amendments` section**, under all of these conditions:
+
+- **Additive only.** It records something *added*, never something changed, narrowed, or reversed. Anything that alters what the original decided is a supersession, not an amendment.
+- **Non-revisionary.** The original decision text is left intact and readable as written. An amendment appends; it never rewrites, deletes, or silently corrects.
+- **Attributed.** Every entry names the ADR that introduced the extension, with a `See Also` cross-reference back to it. The amendment is a pointer, not a new decision — the amending ADR remains where the reasoning lives.
+
+The rationale is discoverability, not convenience. A vocabulary whose canonical list is scattered across the ADRs that happened to extend it is a contract nobody can look up: a consumer reads the ADR that *defines* the vocabulary and gets a list that has been silently incomplete since the first extension. See ADR 0008's `Amendments` section for the worked case — `freeze_frames` and `physical` were added by ADR 0009 and, until amended, were discoverable only from an ADR about restricted tiers.
+
+Anything not meeting all three conditions follows the supersession rule above, unchanged.

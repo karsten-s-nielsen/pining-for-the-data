@@ -11,36 +11,24 @@ Asserts (sampling ids from the live OWNER response — no licensed ids hardcoded
 from __future__ import annotations
 
 import argparse
-import json
-import re
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+# scripts/ is not a package — make the sibling helper module importable when run directly.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _verify_http import NoFollow, get_json, parse_content_range_total
 
 # tracking is the large artifact (validate via Range GET, no full download).
 LARGE_ARTIFACTS = {"tracking"}
 
 
-def parse_content_range_total(header: str) -> int:
-    m = re.search(r"/(\d+)\s*$", header or "")
-    return int(m.group(1)) if m else -1
-
-
-def _get_json(api: str, path: str, token: str) -> dict:
-    req = urllib.request.Request(f"{api}{path}", headers={"Authorization": f"Bearer {token}"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
-class _NoFollow(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
 def _status_or_presigned(api: str, path: str, token: str) -> tuple[int, str | None]:
     """Return (status, location). For 302 returns the presigned URL; otherwise location is None."""
     req = urllib.request.Request(f"{api}{path}", headers={"Authorization": f"Bearer {token}"})
-    opener = urllib.request.build_opener(_NoFollow)
+    opener = urllib.request.build_opener(NoFollow)
     try:
         with opener.open(req, timeout=30) as resp:
             return resp.status, None
@@ -68,8 +56,8 @@ def main() -> int:
 
     failures: list[str] = []
 
-    owner_matches = _get_json(args.api, "/skillcorner/matches", args.owner_token).get("matches", [])
-    public_matches = _get_json(args.api, "/skillcorner/matches", args.public_token).get("matches", [])
+    owner_matches = get_json(args.api, "/skillcorner/matches", args.owner_token).get("matches", [])
+    public_matches = get_json(args.api, "/skillcorner/matches", args.public_token).get("matches", [])
     public_ids = {m["id"] for m in public_matches}
 
     restricted = [m for m in owner_matches if m.get("visibility") == "private"]
@@ -107,7 +95,7 @@ def main() -> int:
             else:
                 failures.append(f"public {mid}/{artifact}: expected 404, got {p_status}")
 
-    owner_players = _get_json(args.api, "/skillcorner/players", args.owner_token).get("players", [])
+    owner_players = get_json(args.api, "/skillcorner/players", args.owner_token).get("players", [])
     if owner_players:
         print(f"OK: owner /skillcorner/players = {len(owner_players)}")
     else:

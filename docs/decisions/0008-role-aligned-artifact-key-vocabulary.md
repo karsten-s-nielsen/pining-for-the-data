@@ -30,6 +30,17 @@ A provider exposing only a *subset* of the vocabulary is expected and fine (IDSS
 
 The legacy **`skillcorner`** provider predates this convention and uses id-prefixed keys (`<match_id>_match`, `tracking`). It is documented as a **known exception**: a single uniform vocabulary does not exist across *all* current providers, and consumers still need a small per-provider map for SkillCorner specifically.
 
+### Amendments
+
+The vocabulary is extensible: a later provider may **add** a role key, which then denotes the same role for every provider. Extensions to date:
+
+| Role key | Added by | Meaning |
+|---|---|---|
+| `freeze_frames` | ADR 0009 (restricted SkillCorner, v0.3.0) | Positional snapshots at discrete moments, not a continuous stream |
+| `physical` | ADR 0009 (restricted SkillCorner, v0.3.0) | Per-player physical/athletic metrics |
+
+The current full vocabulary is therefore `metadata`, `events`, `tracking`, `roster`, `freeze_frames`, `physical`. The subset rule above applies unchanged — `statsbomb` (ADR 0010) exposes `metadata` / `events` / `roster` / `freeze_frames` and deliberately has no `tracking`, because StatsBomb 360 supplies event-moment freeze frames rather than a continuous stream.
+
 ## Consequences
 
 **Positive**
@@ -54,3 +65,5 @@ The legacy **`skillcorner`** provider predates this convention and uses id-prefi
 
 - `docs/superpowers/specs/2026-05-29-idsse-bundesliga-redistribution-design.md` §3.1 — artifact-key vocabulary + SkillCorner divergence
 - ADR 0003 — resource-noun endpoints (related API-shape decision)
+- ADR 0009 — restricted tier under an existing public provider; adds `freeze_frames` and `physical` to the vocabulary above
+- ADR 0010 — faithful-feed mimicry; governs the *content* of provider-native structures, whereas this ADR governs the artifact **envelope** (which keys exist and what they denote)

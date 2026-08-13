@@ -43,7 +43,7 @@ Returns all registered tracking data providers. **Tier-blind** — returns the s
 
 ```json
 {
-  "providers": ["skillcorner", "gradientsports"]
+  "providers": ["gradientsports", "idsse", "skillcorner", "statsbomb"]
 }
 ```
 
@@ -215,6 +215,8 @@ Returns the player reference catalogue for a provider, **filtered by tier**. Pro
 
 The canonical `PlayerRecord` shape: required `id` + (`nickname` OR `firstName`+`lastName`); optional `dob`, `height`, `position`, `positionGroupType`, `nationality`, `source`. Provider-specific extension fields (anything beyond the canonical set) are round-tripped verbatim. JSON Schema published at `schemas/players.schema.json` with stable URN `urn:pining-for-the-data:schema:players:v1`.
 
+**Unset optional fields are absent, not null.** `pining-upload-players` serialises records with `model_dump(exclude_none=True)`, so an optional field a provider never populated is omitted from the served JSON rather than emitted as `null`. Consumers must test for **absence** (`"firstName" in record`) rather than for a null value — `record["firstName"] is None` raises `KeyError`. This is why some providers' records carry only `nickname` and no `firstName`/`lastName` split: those fields are never populated at source, so they never appear in the response at all.
+
 **Tier behaviour**
 
 - PUBLIC tier: receives only entries from `{provider}/players.json`.
@@ -278,7 +280,7 @@ Unauthenticated health check for synthetic monitoring and uptime probes. Returns
 
 ```
 {bucket}/
-├── providers.json              # ["skillcorner", "gradientsports"]
+├── providers.json              # ["gradientsports", "idsse", "skillcorner", "statsbomb"]
 ├── skillcorner/                # public-tier provider
 │   ├── matches.json            # discovery index (object-form artifacts dict)
 │   ├── players.json            # (optional) public-tier player catalogue
@@ -287,21 +289,37 @@ Unauthenticated health check for synthetic monitoring and uptime probes. Returns
 │   │   └── tracking.jsonl
 │   └── game_04/
 │       └── ...
-└── gradientsports/            # restricted-tier provider
+├── idsse/                      # public-tier provider (no _private/ subtree)
+│   ├── matches.json            # all entries marked visibility:"public"
+│   └── example-003/
+│       ├── metadata.xml        # DFL matchinformation
+│       ├── events.xml          # DFL events_raw
+│       └── tracking.xml        # DFL positions_raw_observed
+├── gradientsports/             # restricted-tier provider
+│   ├── matches.json            # all entries marked visibility:"private"
+│   └── _private/               # reserved segment — owner-tier only
+│       ├── players.json        # private-tier player catalogue
+│       └── example-001/
+│           ├── metadata.json
+│           ├── events.json
+│           ├── roster.json
+│           └── tracking.jsonl.bz2
+└── statsbomb/                  # restricted-tier provider (owner tier only)
     ├── matches.json            # all entries marked visibility:"private"
     └── _private/               # reserved segment — owner-tier only
         ├── players.json        # private-tier player catalogue
-        └── example-001/
-            ├── metadata.json
-            ├── events.json
-            ├── roster.json
-            └── tracking.jsonl.bz2
+        └── example-002/
+            ├── metadata.json           # single StatsBomb match object
+            ├── events.json.gz
+            ├── freeze_frames.json.gz
+            └── roster.json
 ```
 
 - SSE-KMS encryption at rest (single CMK across data + audit buckets)
 - Versioning enabled on both buckets
 - No public access — all serving via Lambda presigned URLs
 - The `_private/` path segment is reserved; path-param validators reject `_`-prefixed values (defense in depth alongside the application-layer tier check). See ADR 0002.
+- `statsbomb` is **owner-tier only** — every entry is `visibility: "private"` and the provider has no public tier. Its artifact keys are `events`, `freeze_frames`, `roster` and `metadata`; there is deliberately **no `tracking` artifact**, because StatsBomb 360 supplies event-moment freeze frames rather than continuous tracking (ADR 0008 permits a provider to expose a subset of the role vocabulary). Its `metadata` artifact is a **single JSON object in StatsBomb feed shape** (nested `competition{}`, `season{}`, `home_team{}`, `stadium{}`, `referee{}`), not an array. See ADR 0010.
 
 ---
 

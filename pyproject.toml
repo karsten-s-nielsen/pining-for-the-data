@@ -1,6 +1,6 @@
 [project]
 name = "pining-for-the-data"
-version = "0.3.0"
+version = "0.4.0"
 description = "Open soccer tracking data — redistribution, validation, and mock provider API"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -69,6 +69,10 @@ select = [
 "scripts/verify_idsse_load.py" = ["S310"]
 # Verifier: urllib.request to a configurable HTTPS API endpoint is the entire point (S310 false-positive).
 "scripts/verify_skillcorner_realmadrid_load.py" = ["S310"]
+# Verifier: urllib.request to a configurable HTTPS API endpoint is the entire point (S310 false-positive).
+"scripts/verify_statsbomb_load.py" = ["S310"]
+# Shared verifier HTTP helpers: same rationale as the verify_* scripts that import them.
+"scripts/_verify_http.py" = ["S310"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["deidentify", "formats", "publish", "mock_api", "canonical"]

@@ -11,38 +11,25 @@ Asserts (public tier — this is open redistributable data, visible to everyone)
 from __future__ import annotations
 
 import argparse
-import json
-import re
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+# scripts/ is not a package — make the sibling helper module importable when run directly.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _verify_http import NoFollow, get_json, parse_content_range_total
 
 EXPECTED_MATCH_COUNT = 7
 ARTIFACTS_PER_MATCH = ["metadata", "events", "tracking"]
 LARGE_ARTIFACTS = {"events", "tracking"}
 
 
-def parse_content_range_total(header: str) -> int:
-    """Return the total size from a `Content-Range: bytes a-b/total` header, or -1."""
-    m = re.search(r"/(\d+)\s*$", header or "")
-    return int(m.group(1)) if m else -1
-
-
-def _get_json(api: str, path: str, token: str) -> dict:
-    req = urllib.request.Request(f"{api}{path}", headers={"Authorization": f"Bearer {token}"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
-class _NoFollow(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
 def _presigned_url(api: str, path: str, token: str) -> str:
     """Return the presigned S3 URL from the API's 302 (without following it)."""
     req = urllib.request.Request(f"{api}{path}", headers={"Authorization": f"Bearer {token}"})
-    opener = urllib.request.build_opener(_NoFollow)
+    opener = urllib.request.build_opener(NoFollow)
     try:
         with opener.open(req, timeout=30) as resp:
             raise RuntimeError(f"expected 302 from {path}, got {resp.status}")
@@ -80,7 +67,7 @@ def main() -> int:
 
     matches: list[dict] = []
     try:
-        body = _get_json(args.api, "/idsse/matches", args.public_token)
+        body = get_json(args.api, "/idsse/matches", args.public_token)
         matches = body.get("matches", [])
         if len(matches) != EXPECTED_MATCH_COUNT:
             failures.append(f"public /idsse/matches: expected {EXPECTED_MATCH_COUNT}, got {len(matches)}")
@@ -90,7 +77,7 @@ def main() -> int:
         failures.append(f"public /idsse/matches: request failed: {e}")
 
     try:
-        providers = _get_json(args.api, "/providers", args.public_token).get("providers", [])
+        providers = get_json(args.api, "/providers", args.public_token).get("providers", [])
         if "idsse" not in providers:
             failures.append("public /providers: 'idsse' missing")
         else:
@@ -105,12 +92,12 @@ def main() -> int:
         if dates:
             lo = dates[0]
             try:
-                got = _get_json(args.api, f"/idsse/matches?dateFrom={lo}", args.public_token).get("matches", [])
+                got = get_json(args.api, f"/idsse/matches?dateFrom={lo}", args.public_token).get("matches", [])
                 if len(got) != len(matches):
                     failures.append(f"dateFrom={lo}: expected {len(matches)}, got {len(got)}")
                 else:
                     print(f"OK: dateFrom={lo} returns all {len(got)}")
-                none = _get_json(args.api, "/idsse/matches?dateTo=1900-01-01", args.public_token).get("matches", [])
+                none = get_json(args.api, "/idsse/matches?dateTo=1900-01-01", args.public_token).get("matches", [])
                 if none:
                     failures.append(f"dateTo=1900-01-01: expected 0, got {len(none)}")
                 else:

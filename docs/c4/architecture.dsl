@@ -9,7 +9,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             ingestCli = container "Ingest CLI" "Validates SkillCorner V3 match JSON + tracking JSONL" "Python 3.12+, pining-ingest"
             rosterCli = container "Roster Generator CLI" "Generates synthetic rosters with fictional identities for de-identification" "Python 3.12+, pining-generate-roster"
             deidentify = container "De-identification Engine" "Two-layer jersey-to-identity mapping using fictional name pools" "Python 3.12+"
-            formats = container "Format Handlers" "Read/write/validate SkillCorner V3; parse IDSSE/DFL matchinformation XML for index metadata (positions/events served as-is)" "Python 3.12+, JSON/JSONL/XML"
+            formats = container "Format Handlers" "Read/write/validate SkillCorner V3; parse the restricted SkillCorner bundle meta and IDSSE/DFL matchinformation XML for index metadata; de-pivot + re-nest the StatsBomb 360 club delivery (large bodies served as-is)" "Python 3.12+, JSON/JSONL/XML"
             uploadCli = container "Upload CLI (Matches)" "Uploads game artifacts; --visibility public|private; validates against MatchEntry Pydantic model" "Python 3.12+, boto3, pining-upload"
             uploadPlayersCli = container "Upload CLI (Players)" "Canonical-JSON-only player catalogue uploads; rejects CSV with reference to Gradient Sports orchestrator" "Python 3.12+, boto3, pining-upload-players"
             publishCli = container "Publish CLI" "Pushes Parquet files and dataset cards to HuggingFace Hub" "Python 3.12+, huggingface_hub, pining-publish"
@@ -17,6 +17,10 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             verifyScript = container "Verify Script" "Post-load HTTP verification: counts, visibility-leak checks, content-agnostic spot-check sampling" "Python 3.12+, scripts/verify_gradient_load.py"
             idsseOrchestrator = container "IDSSE Orchestrator" "One-shot script: fetch version-pinned figshare release, md5-verify against committed manifest, group DFL XML into per-match triplets, drive uploadCli (public tier)" "Python 3.12+, scripts/upload_idsse_bundesliga.py"
             idsseVerify = container "IDSSE Verify Script" "Post-load HTTP verification: 7 matches/21 artifacts, public-tier visibility, date-filter parity, size-aware artifact checks (Range GET for large XML)" "Python 3.12+, scripts/verify_idsse_load.py"
+            skillcornerRestrictedOrchestrator = container "SkillCorner Restricted Orchestrator" "One-shot script: discover matches, stage/gzip the five role-aligned artifacts, derive the owner-tier player catalogue skipping ids already public, drive uploadCli + uploadPlayersCli (owner tier)" "Python 3.12+, scripts/upload_skillcorner_realmadrid.py"
+            skillcornerRestrictedVerify = container "SkillCorner Restricted Verify Script" "Post-load HTTP verification: owner-vs-public tier split, restricted ids absent from the public list, owner-tier player catalogue present, Range GET for large tracking bodies" "Python 3.12+, scripts/verify_skillcorner_realmadrid_load.py"
+            statsbombOrchestrator = container "StatsBomb Orchestrator" "One-shot script: delivery-coherence pre-flight, de-pivot + re-nest the match row to feed shape, stage/gzip the four role-aligned artifacts, drive uploadCli + uploadPlayersCli (owner tier)" "Python 3.12+, scripts/upload_statsbomb_club.py"
+            statsbombVerify = container "StatsBomb Verify Script" "Post-load HTTP verification: owner-vs-public tier split, exact artifact key set (events, freeze_frames, roster, metadata), metadata envelope shape, Range GET for large bodies" "Python 3.12+, scripts/verify_statsbomb_load.py"
 
             apiGateway = container "API Gateway" "REST API with bearer token auth, throttled (10 rps / 50 burst)" "AWS API Gateway HTTP API"
             lambdaProviders = container "list_providers Lambda" "Returns provider catalogue (tier-blind)" "AWS Lambda, Python 3.12"
@@ -49,6 +53,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         luxuryLakehouse = softwareSystem "luxury-lakehouse" "Serverless soccer analytics platform; consumes the mock API with the owner token" "External"
         gradientSports = softwareSystem "Gradient Sports" "Source of restricted FIFA WC 2022 dataset; operator has download access" "External"
         idsse = softwareSystem "IDSSE / DFL Open Data" "CC-BY 4.0 Bundesliga tracking + event data (Bassek et al. 2025); version-pinned figshare release, provided with DFL/Sportec authorization" "External"
+        skillcornerRestricted = softwareSystem "SkillCorner Restricted Bundle" "Restricted SkillCorner multi-artifact tracking bundle (owner tier); operator has a licensed copy" "External"
+        statsbomb = softwareSystem "StatsBomb" "Commercial StatsBomb 360 (owner tier)" "External"
 
         analyst -> huggingface "Downloads tracking data" "load_dataset() / HTTPS"
         developer -> apiGateway "Tests ingestion adapters against the mock API" "HTTPS + public bearer token"
@@ -60,11 +66,17 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         operator -> verifyScript "Runs post-load verification" "Shell"
         operator -> idsseOrchestrator "Bulk-loads IDSSE Bundesliga (public tier)" "Shell"
         operator -> idsseVerify "Runs IDSSE post-load verification" "Shell"
+        operator -> skillcornerRestrictedOrchestrator "Bulk-loads the restricted SkillCorner bundle (owner tier)" "Shell"
+        operator -> skillcornerRestrictedVerify "Runs restricted SkillCorner post-load verification" "Shell"
+        operator -> statsbombOrchestrator "Loads the commercial StatsBomb 360 delivery (owner tier)" "Shell"
+        operator -> statsbombVerify "Runs StatsBomb post-load verification" "Shell"
         operator -> ssmParam "Sets owner token (out-of-band)" "aws ssm put-parameter"
 
         skillcorner -> formats "Source tracking data (git clone)" "Git LFS"
         gradientSports -> gradientOrchestrator "Source bundle (operator-downloaded copy)" "Filesystem"
         idsse -> idsseOrchestrator "Source DFL XML (version-pinned figshare fetch, md5-verified)" "HTTPS"
+        skillcornerRestricted -> skillcornerRestrictedOrchestrator "Source bundle (operator-downloaded copy)" "Filesystem"
+        statsbomb -> statsbombOrchestrator "Source club file drop (operator-downloaded copy)" "Filesystem"
 
         ingestCli -> formats "Validates match + tracking files" "Python import"
         rosterCli -> deidentify "Generates synthetic rosters" "Python import"
@@ -79,6 +91,14 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         idsseOrchestrator -> formats "Parses matchinformation XML for index metadata" "Python import"
         idsseOrchestrator -> uploadCli "Drives per-match upload (visibility=public)" "Python import"
         idsseVerify -> apiGateway "Polls public endpoints; asserts post-conditions (size-aware)" "HTTPS"
+        skillcornerRestrictedOrchestrator -> formats "Parses meta/*.json for index metadata + player catalogue (ADR 0009)" "Python import"
+        skillcornerRestrictedOrchestrator -> uploadCli "Drives per-match upload (visibility=private)" "Python import"
+        skillcornerRestrictedOrchestrator -> uploadPlayersCli "Drives player catalogue upload (visibility=private)" "Python import"
+        skillcornerRestrictedVerify -> apiGateway "Polls endpoints with both tokens; asserts post-conditions" "HTTPS"
+        statsbombOrchestrator -> formats "Reads, de-pivots and re-nests the delivered bundle (ADR 0010)" "Python import"
+        statsbombOrchestrator -> uploadCli "Drives per-match upload (visibility=private)" "Python import"
+        statsbombOrchestrator -> uploadPlayersCli "Drives player catalogue upload (visibility=private)" "Python import"
+        statsbombVerify -> apiGateway "Polls endpoints with both tokens; asserts post-conditions" "HTTPS"
 
         apiGateway -> lambdaProviders "GET /v1/providers" "Lambda proxy"
         apiGateway -> lambdaMatches "GET /v1/{provider}/matches" "Lambda proxy"
@@ -156,6 +176,10 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
                 containerInstance verifyScript
                 containerInstance idsseOrchestrator
                 containerInstance idsseVerify
+                containerInstance skillcornerRestrictedOrchestrator
+                containerInstance skillcornerRestrictedVerify
+                containerInstance statsbombOrchestrator
+                containerInstance statsbombVerify
                 containerInstance canonicalModels
                 containerInstance schemas
             }
@@ -168,17 +192,71 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             autoLayout
         }
 
+        # Level 2 is split into one runtime view plus per-concern / per-provider
+        # slices. A single `include *` container view renders all 31 containers
+        # (41 element nodes) — past the ~15-per-view readability guideline, and it
+        # degraded with every provider added (each brings an orchestrator + a
+        # verify script). The split is a VIEWS-only concern: the model is
+        # unchanged, and every container appears in at least one slice.
+        # Naming follows the `Containers_<scopeId>` convention so all slices nest
+        # as sub-tabs under the single "Containers" group.
+
+        # Runtime request path: consumers -> API Gateway -> Lambdas -> S3/SSM/KMS.
         container pining "Containers" {
+            include analyst developer luxuryLakehouse
+            include apiGateway lambdaProviders lambdaMatches lambdaArtifact lambdaPlayers lambdaPlayer lambdaHealth
+            include dataBucket ssmParam kmsKey
+            autoLayout
+        }
+
+        # Shared local toolchain: validation, de-identification, canonical models,
+        # schema generation, and the HuggingFace publishing path for open data.
+        container pining "Containers_Toolchain" {
+            include operator analyst skillcorner huggingface
+            include ingestCli rosterCli deidentify formats
+            include uploadCli uploadPlayersCli publishCli
+            include canonicalModels schemas dataBucket
+            autoLayout
+        }
+
+        # Per-provider ingestion slices — constant size as providers are added.
+        container pining "Containers_GradientSports" {
+            include operator gradientSports gradientOrchestrator verifyScript
+            include uploadCli uploadPlayersCli dataBucket apiGateway
+            autoLayout
+        }
+
+        container pining "Containers_IDSSE" {
+            include operator idsse idsseOrchestrator idsseVerify
+            include formats uploadCli dataBucket apiGateway
+            autoLayout
+        }
+
+        container pining "Containers_SkillCornerRestricted" {
+            include operator skillcornerRestricted skillcornerRestrictedOrchestrator skillcornerRestrictedVerify
+            include formats uploadCli uploadPlayersCli dataBucket apiGateway
+            autoLayout
+        }
+
+        container pining "Containers_StatsBomb" {
+            include operator statsbomb statsbombOrchestrator statsbombVerify
+            include formats uploadCli uploadPlayersCli dataBucket apiGateway
+            autoLayout
+        }
+
+        # Storage, encryption, audit trail, and observability substrate.
+        container pining "Containers_Platform" {
+            include operator dataBucket auditBucket cloudtrail kmsKey ssmParam
+            include snsTopic cwDashboard
+            autoLayout
+        }
+
+        component lambdaArtifact "Component_lambdaArtifact" {
             include *
             autoLayout
         }
 
-        component lambdaArtifact "GetArtifactComponents" {
-            include *
-            autoLayout
-        }
-
-        dynamic pining "PrivateArtifactDownload" {
+        dynamic pining "Dynamic_PrivateArtifactDownload" {
             luxuryLakehouse -> apiGateway "Requests private artifact with owner bearer token"
             apiGateway -> lambdaArtifact "Routes to get_artifact handler"
             lambdaArtifact -> ssmParam "Fetches owner token (warm-container cache miss only)"

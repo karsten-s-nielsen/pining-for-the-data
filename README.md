@@ -38,12 +38,14 @@ The end result is clean, highly structured, and open-source soccer tracking data
 
 > **Owner tier on `skillcorner`:** beyond the public open data, the `skillcorner` provider also carries **restricted** matches served only to the owner bearer token (`visibility=private`); public consumers see only the redistributed open data. These artifacts use role-aligned keys (`tracking`, `events`, `freeze_frames`, `metadata`, `physical`). Restricted data is access-gated, never redistributed. See [ADR 0009](docs/decisions/0009-restricted-tier-under-existing-public-provider.md).
 
+> **Owner-tier provider `statsbomb`:** a commercial StatsBomb 360 club delivery, served only to the owner bearer token (`visibility=private`) — there is **no public tier** for this provider. Artifacts use role-aligned keys: `events`, `freeze_frames`, `roster`, `metadata`. There is deliberately no `tracking` artifact — StatsBomb 360 supplies event-moment freeze frames, not continuous tracking. Restricted data is access-gated, never redistributed. See [ADR 0010](docs/decisions/0010-faithful-feed-mimicry.md).
+
 The data isn't dead. It's just resting.
 
 ## Key Features
 
 - **De-identification Engine** &mdash; Generates synthetic rosters and manages two-layer jersey mappings. Four hand-picked character names, the rest randomly generated from fictional universes (GOT, LOTR, Breaking Bad, Princess Bride, and more).
-- **Format Handlers** &mdash; Validates and processes provider-specific tracking data (SkillCorner V3 JSON/JSONL). [JSONL](https://jsonlines.org/) = one JSON object per line, one line per frame. Respo.Vision 3D pose scaffolded for future use.
+- **Format Handlers** &mdash; Validates and processes provider-specific tracking data: SkillCorner V3 JSON/JSONL, the SkillCorner multi-artifact bundle (owner tier), IDSSE/Sportec DFL XML, and StatsBomb 360 (owner tier). [JSONL](https://jsonlines.org/) = one JSON object per line, one line per frame. Respo.Vision 3D pose scaffolded for future use.
 - **Automated Publication** &mdash; Pushes tracking data and dataset cards directly to the HuggingFace Hub.
 - **Mock Provider API** &mdash; AWS-backed REST API mimicking real provider download protocols, so anyone can test ingestion adapters without a commercial account.
 
@@ -95,7 +97,7 @@ git clone https://github.com/karsten-s-nielsen/pining-for-the-data.git
 cd pining-for-the-data
 uv sync --extra dev
 
-# Run tests — all 166 should pass
+# Run tests — all 333 should pass
 uv run pytest
 ```
 
@@ -186,15 +188,15 @@ Additional documentation:
 pining-for-the-data/
 ├── src/
 │   ├── deidentify/          # Roster generation, name pools, jersey mapping
-│   ├── formats/             # Provider format readers/writers (SkillCorner, Respo.Vision)
+│   ├── formats/             # Provider format readers/writers (SkillCorner V3 + bundle, IDSSE/Sportec, StatsBomb 360; Respo.Vision future)
 │   ├── publish/             # HuggingFace Hub dataset publishing
 │   ├── mock_api/            # Upload CLIs (pining-upload, pining-upload-players)
 │   ├── canonical/           # Canonical Pydantic models (MatchEntry, PlayerRecord); kept out of Lambda src so the runtime stays pydantic-free (ADR 0006)
-│   └── tests/               # pytest test suite (166 tests)
+│   └── tests/               # pytest test suite (333 tests)
 ├── name_pools/              # JSON name lists (fictional first/last names, cities)
 ├── rosters/                 # Generated de-identified rosters per game
 ├── schemas/                 # Published JSON Schemas for matches.json + players.json
-├── scripts/                 # One-shot ops scripts (regenerate_schemas, upload_gradient_wc2022, verify_gradient_load)
+├── scripts/                 # One-shot ops scripts (schema regeneration; per-provider upload + verify)
 ├── terraform/               # AWS infrastructure (S3 + API Gateway + Lambda + SSM + KMS + CloudTrail)
 ├── assets/                  # Repo logo and images
 ├── docs/

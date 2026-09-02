@@ -6,7 +6,7 @@ Companion repo to luxury-lakehouse.
 ## Architecture
 
 - `src/deidentify/` — name pools, roster generation, two-layer jersey→identity mapping
-- `src/formats/` — provider format readers/writers (SkillCorner V3 JSON/JSONL, SkillCorner multi-artifact bundle for restricted owner-tier data, IDSSE/Sportec DFL XML, StatsBomb commercial 360 club bundle for restricted owner-tier data, Respo.Vision JSON future)
+- `src/formats/` — provider format readers/writers (SkillCorner V3 JSON/JSONL, SkillCorner multi-artifact bundle + raw-JSON family for restricted owner-tier data, IDSSE/Sportec DFL XML, StatsBomb commercial 360 club bundle for restricted owner-tier data, Respo.Vision JSON future). Owner-tier SkillCorner is stored as the canonical columnar Parquet/zstd set (nested `tracking.parquet`, `events`/`physical` Parquet, freeze dropped, per-match `format_version` marker — ADR 0011; pure transforms in `skillcorner_canonical.py`)
 - `src/publish/` — HuggingFace Hub dataset publishing
 - `src/mock_api/` — Upload CLIs (pining-upload, pining-upload-players)
 - `src/tests/` — pytest test suite

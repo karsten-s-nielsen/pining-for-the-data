@@ -16,6 +16,7 @@ This directory contains [Architecture Decision Records](https://adr.github.io/) 
 | [0008](0008-role-aligned-artifact-key-vocabulary.md) | Role-Aligned Artifact-Key Vocabulary Across Providers | Accepted | IDSSE public redistribution (spec §3.1) |
 | [0009](0009-restricted-tier-under-existing-public-provider.md) | Restricted Data Under an Existing Public Provider | Accepted | SkillCorner RM owner-tier ingest (spec §13) |
 | [0010](0010-faithful-feed-mimicry.md) | Faithful-Feed Mimicry | Accepted | StatsBomb commercial 360 owner-tier ingest (spec §3) |
+| [0011](0011-canonical-owner-tier-skillcorner-format.md) | Canonical Owner-Tier SkillCorner Format (Columnar Parquet/zstd) | Accepted | SkillCorner footprint + format convergence (spec 2026-09-01) |
 
 ## Format
 

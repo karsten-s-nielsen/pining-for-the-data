@@ -31,6 +31,7 @@ def upload_game(
     source_name: str | None = None,
     source_url: str | None = None,
     source_licence: str | None = None,
+    format_version: int | None = None,
 ) -> list[str]:
     """Upload all files in game_dir to S3 and update indexes.
 
@@ -110,6 +111,7 @@ def upload_game(
         source_name,
         source_url,
         source_licence,
+        format_version,
     )
     _update_matches_json(s3, bucket, provider, entry)
     _update_providers_json(s3, bucket, provider)
@@ -128,6 +130,7 @@ def _build_match_entry(
     source_name: str | None,
     source_url: str | None,
     source_licence: str | None,
+    format_version: int | None,
 ) -> dict:
     """Assemble and Pydantic-validate a MatchEntry. Raises on validation error."""
     payload: dict = {
@@ -136,6 +139,8 @@ def _build_match_entry(
         "visibility": visibility,
         "updated_at": utc_now_iso(),
     }
+    if format_version is not None:
+        payload["format_version"] = format_version
     if date:
         payload["date"] = date
     if home:
@@ -268,6 +273,12 @@ def main() -> None:
         default=None,
         help="Source licence text (British spelling canonical; --source-license also accepted)",
     )
+    parser.add_argument(
+        "--format-version",
+        type=int,
+        default=None,
+        help="Artifact-format generation to record (e.g. 2 for the canonical Parquet/zstd set)",
+    )
     args = parser.parse_args()
 
     if not args.bucket:
@@ -292,5 +303,6 @@ def main() -> None:
         source_name=args.source_name,
         source_url=args.source_url,
         source_licence=args.source_licence,
+        format_version=args.format_version,
     )
     print(f"Done — {len(artifacts)} artifact(s) uploaded.")

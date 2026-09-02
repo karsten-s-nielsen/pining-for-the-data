@@ -112,6 +112,19 @@
         }
       ],
       "default": null
+    },
+    "format_version": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Artifact-format generation. Absent = legacy layout; 2 = canonical Parquet/zstd set.",
+      "title": "Format Version"
     }
   },
   "required": [

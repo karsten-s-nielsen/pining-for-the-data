@@ -97,6 +97,19 @@ def is_complete(root: Path, match_id: str) -> bool:
     return not missing_artifacts(root, match_id)
 
 
+# Roles required for a canonical parquet-family ingest (RM + PL 24/25). `physical` is optional
+# and `freeze` is dropped from the canonical output, so neither forces incompleteness. This is
+# ADDITIVE (spec §6.2): ARTIFACT_SPECS / source_files / missing_artifacts / is_complete describe
+# the 5-role *source* bundle and are left unchanged.
+REQUIRED_ROLES = {"metadata", "tracking", "events"}
+
+
+def missing_required(root: Path, match_id: str) -> list[str]:
+    """Required roles whose source file is absent. physical/freeze are optional and ignored."""
+    files = source_files(root, match_id)
+    return sorted(role for role in REQUIRED_ROLES if not files[role].is_file())
+
+
 def players_from_meta(meta: dict) -> list[dict]:
     """Derive canonical PlayerRecord dicts (without visibility/updated_at) from meta.players.
 

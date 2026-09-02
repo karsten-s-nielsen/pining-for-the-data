@@ -58,7 +58,7 @@ Only open data reaches HuggingFace Hub. The mock API serves both: the public bea
 
 **Three modes:**
 - **As-is redistribution** (`skillcorner` open data, `idsse`): validate and publish, no transformation
-- **Access-gated serving** (restricted `skillcorner` bundle, `gradientsports`, `statsbomb`): loaded to the owner tier only, never redistributed. Small metadata files are parsed to build the index; large bodies are served as delivered, reshaped only where the source layout differs from the provider's own feed shape (ADR 0010)
+- **Access-gated serving** (restricted `skillcorner`, `gradientsports`, `statsbomb`): loaded to the owner tier only, never redistributed. Small metadata files are parsed to build the index. Large bodies are generally served as delivered, reshaped only where the source differs from the provider's own feed shape (ADR 0010) — the exception is owner-tier `skillcorner`, normalized to the canonical columnar Parquet/zstd format (ADR 0011)
 - **De-identification** (future private data): full synthetic identity pipeline via RosterGenerator + TwoLayerMapping — retained, not applied to any currently served provider
 
 ---
@@ -96,7 +96,9 @@ Read and validate provider-specific tracking data.
 | Module | Status | Provider | Format |
 |--------|--------|----------|--------|
 | `skillcorner.py` | Implemented | SkillCorner | V3 match JSON + tracking JSONL at 10fps |
-| `skillcorner_bundle.py` | Implemented | SkillCorner (restricted multi-artifact bundle, owner tier) | Multi-artifact bundle — only the small `meta/*.json` is parsed, for index metadata and the owner-tier player catalogue (ADR 0009); tracking/events/freeze/physical bodies served as-is |
+| `skillcorner_bundle.py` | Implemented | SkillCorner (restricted multi-artifact bundle, owner tier) | Parquet-family bundle reader — `meta/*.json` parsed for index metadata + owner-tier player catalogue (ADR 0009); bodies stored in the canonical columnar format (ADR 0011) |
+| `skillcorner_canonical.py` | Implemented | SkillCorner (owner tier) | Pure transforms to the canonical set (ADR 0011): tracking JSON ⇄ nested Parquet (lossless round-trip), events CSV/Parquet → Parquet, combined physical JSON → per-match Parquet; all zstd, `freeze_frames` dropped |
+| `skillcorner_raw.py` | Implemented | SkillCorner (raw-JSON family, owner tier) | Raw-JSON deliveries (Champions League 25/26, Premier League 25/26): manifest-driven discovery + role mapping into the canonical set |
 | `idsse.py` | Implemented | IDSSE / DFL / Sportec | DFL XML (matchinformation parsed for index metadata; positions/events served as-is) |
 | `statsbomb.py` | Implemented | StatsBomb (commercial 360, owner tier) | Club file drop — de-pivots `statsbombpy` column-orient dumps and re-nests the match row to feed shape (ADR 0010); events/frames/lineups served as-is |
 | `respovision.py` | Scaffolded | Respo.Vision | JSON, 3D pose, 50+ keypoints |

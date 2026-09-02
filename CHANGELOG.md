@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-02
+
+### Added
+- **Canonical owner-tier SkillCorner format** (ADR 0011). Owner-tier SkillCorner matches are stored as a columnar Parquet/zstd set — nested `tracking.parquet` (one row per frame, byte-exact-lossless under a defined per-column-type round-trip equivalence), plus `events.parquet` and `physical.parquet` (zstd) — with `freeze_frames` **dropped** (a verified byte-identical, event-synchronised slice of continuous tracking, regenerable from tracking + events) and a per-match integer `format_version` marker in `matches.json`. Tracking drops from ~140 MB of gzip-JSON to ~4.6 MB columnar. Role keys are unchanged (ADR 0008 — the wire format is out-of-band of the role key). The public redistributed tier is untouched (Hyrum's Law + keeping the MIT redistribution native).
+- `src/formats/skillcorner_canonical.py` — pure, I/O-free transforms: tracking JSON ⇄ nested Parquet under a fixed schema with a per-column-type round-trip equivalence relation (integer columns compared value-and-type; float coordinates by numeric equality after widening; absent optional keys normalized to null), events CSV/Parquet → Parquet (SAFE cast against the pinned reference — a lossy value raises rather than silently truncating), and combined physical JSON split → per-match Parquet.
+- `src/formats/skillcorner_raw.py` — raw-JSON-family reader (Champions League 25/26, Premier League 25/26): manifest-driven match discovery and role mapping. Metadata schema is shared with the parquet family (`match_info` / `players_from_meta` reused).
+- `src/formats/skillcorner_events_reference.py` + `schemas/skillcorner_events_reference.json` — a pinned `{column: Arrow-dtype}` reference (seeded once from an authored events Parquet) so CSV-family events conform deterministically to the same schema across matches and seasons.
+- `scripts/migrate_skillcorner_tracking_parquet.py` — in-place S3 migration of the existing owner-tier matches, gated on a **stored-object** safety check: no owner-tier object is overwritten or deleted until its replacement has been re-fetched from S3 and verified (events/physical stage → verify → swap; delete is always last), with a private-tier-only key guard and a self-healing re-run that sweeps any legacy artifacts orphaned by a crash between index-update and delete.
+- `scripts/upload_skillcorner_raw.py` — raw-JSON ingest adapter (owner tier, `format_version=2`); `scripts/verify_skillcorner_canonical_load.py` — post-load verification (tracking is `.parquet`, `freeze_frames` 404s, `format_version=2`); `scripts/seed_skillcorner_events_reference.py` — reference-schema seeder; `scripts/benchmark_skillcorner_tracking_format.py` — reproduces the tracking-footprint figures (raw / gzip / Parquet-snappy / Parquet-zstd) against an operator-local tracking file.
+- `MatchEntry.format_version` (optional) and a `--format-version` flag on `pining-upload`.
+- ADR 0011 — Canonical Owner-Tier SkillCorner Format (Columnar Parquet/zstd); amends the owner-tier format stance from ADR 0009 / the RM design spec, relates to ADR 0008 and ADR 0010.
+
+### Changed
+- `src/formats/skillcorner_bundle.py` — **additive** `REQUIRED_ROLES` / `missing_required` for the relaxed parquet-family completeness check (Premier League 24/25 has no freeze or physical layer). `ARTIFACT_SPECS` / `source_files` / `is_complete` are left unchanged (they describe the source bundle; the canonical output drops freeze via the transforms and migration).
+- Test count: 333 → 368 (+35 unit tests, including the tracking round-trip equivalence edge cases, the migration's stored-object safety gate and private-tier guard, and the events safe-cast abort; wholly-invented fixtures only — no licensed id, and no real person's attributes, are committed).
+- Documentation: README, ARCHITECTURE.md, CLAUDE.md and the ADR index updated for the canonical owner-tier format; the C4 architecture diagram regenerated (new SkillCorner migration + raw-ingest + verify scripts).
+
 ## [0.4.0] - 2026-08-12
 
 ### Added

@@ -64,6 +64,10 @@ class MatchEntry(BaseModel):
     away: str | None = None
     provenance: str | None = None
     source: _SourceMeta | None = None
+    format_version: int | None = Field(
+        default=None,
+        description="Artifact-format generation. Absent = legacy layout; 2 = canonical Parquet/zstd set.",
+    )
 
     @model_validator(mode="after")
     def _validate_artifact_keys(self) -> MatchEntry:

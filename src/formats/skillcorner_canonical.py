@@ -124,19 +124,16 @@ def recompress_parquet_zstd(parquet_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
-def events_csv_to_parquet(csv_bytes: bytes) -> bytes:
-    """CSV events -> Parquet (zstd), shared columns conformed to the pinned reference dtypes.
+def _conform_events_table(table: pa.Table) -> bytes:
+    """Conform an events Arrow table to the pinned reference dtypes -> Parquet (zstd).
 
-    A value that cannot be represented in the reference dtype raises (SAFE cast) rather than
-    silently truncating/overflowing — preserving spec §5.1 "values unchanged". Newer-season
-    columns absent from the reference keep their inferred nullable type.
+    Shared columns are SAFE-cast to the reference dtype: a value that cannot be represented
+    raises rather than silently truncating/overflowing — preserving spec §5.1 "values unchanged".
+    Newer-season columns absent from the reference keep their inferred nullable type. Shared by the
+    CSV (raw family) and Parquet (parquet family) events paths so every source produces the SAME
+    event schema (the shared 294-col core identically typed; newer-season extras nullable).
     """
-    # low_memory=False: read the whole file so per-column dtype inference is deterministic
-    # (the default chunked read infers mixed types on the wider real-season CSVs). Shared
-    # columns are pinned by the reference cast below; this fixes the ~16 extra columns too.
-    df = pd.read_csv(io.BytesIO(csv_bytes), low_memory=False)
     ref = load_events_reference_schema()
-    table = pa.Table.from_pandas(df, preserve_index=False)
     extra_cols = {c: str(table.schema.field(c).type) for c in table.schema.names if c not in ref}
     target = reference_arrow_schema(extra_cols)
     ordered = [field.name for field in target if field.name in table.schema.names]
@@ -145,6 +142,26 @@ def events_csv_to_parquet(csv_bytes: bytes) -> bytes:
     buf = io.BytesIO()
     pq.write_table(table, buf, compression="zstd")
     return buf.getvalue()
+
+
+def events_csv_to_parquet(csv_bytes: bytes) -> bytes:
+    """CSV events (raw family: dynamic_events/*.json, actually CSV) -> Parquet (zstd), conformed.
+
+    low_memory=False: read the whole file so per-column dtype inference is deterministic (the
+    default chunked read infers mixed types on the wider real-season CSVs). Shared columns are
+    pinned by the reference cast in _conform_events_table; this fixes the ~16 extra columns too.
+    """
+    df = pd.read_csv(io.BytesIO(csv_bytes), low_memory=False)
+    return _conform_events_table(pa.Table.from_pandas(df, preserve_index=False))
+
+
+def events_parquet_to_parquet(parquet_bytes: bytes) -> bytes:
+    """Parquet events (parquet family: RM/PL24-25 dynamic/*.parquet) -> Parquet (zstd), conformed.
+
+    Same reference-conform contract as the CSV path, so parquet-family events carry a schema
+    identical to the CSV-family events — no per-source schema drift for the lakehouse consumer.
+    """
+    return _conform_events_table(pq.read_table(io.BytesIO(parquet_bytes)))
 
 
 def physical_json_to_per_match_parquet(results: list[dict]) -> dict[str, bytes]:

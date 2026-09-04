@@ -13,6 +13,7 @@ gated ops step. See docs/superpowers/specs/2026-09-01-skillcorner-canonical-parq
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import sys
@@ -24,7 +25,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
-from formats.skillcorner_bundle import match_info  # noqa: E402
+from formats.skillcorner_bundle import match_info, partition_ingestible  # noqa: E402
 from formats.skillcorner_canonical import (  # noqa: E402
     events_csv_to_parquet,
     physical_json_to_per_match_parquet,
@@ -62,8 +63,12 @@ def ingest_match(
 
 
 def main() -> None:
+    # Emit UTF-8 so logging a non-ASCII team name (e.g. Champions League clubs) never crashes on a
+    # legacy console codepage — cp1252 cannot encode characters such as 'ğ'.
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+
     import boto3
-    from huggingface_hub import hf_hub_download  # local import: only needed for the live ingest
+    from huggingface_hub import HfApi, hf_hub_download  # local import: only needed for the live ingest
     from upload_skillcorner_realmadrid import derive_players, public_player_ids
 
     from mock_api.upload import upload_game
@@ -92,11 +97,29 @@ def main() -> None:
     match_ids = discover_manifest_matches(manifest)
     if args.limit:
         match_ids = match_ids[: args.limit]
+
+    # Skip defective matches up front (Champions League ships zero-byte tracking, a missing-tracking
+    # match, and a missing-events match; the manifest optimistically lists some of them). Sizes come
+    # from the HF file inventory, so a defective body is never downloaded/parsed.
+    api = HfApi()
+    inventory = {
+        f.rfilename: (f.size or 0) for f in (api.dataset_info(args.hf_repo, files_metadata=True).siblings or [])
+    }
+
+    def role_size(mid: str, role: str) -> int | None:
+        return inventory.get(raw_role_files(mid)[role])
+
+    match_ids, skipped = partition_ingestible(match_ids, role_size)
+    if skipped:
+        print(f"Skipping {len(skipped)} defective match(es):")
+        for mid, reason in sorted(skipped.items()):
+            print(f"  SKIP {mid}: {reason}")
+
     physical_index: dict[str, list[dict]] = {}
     for row in json.loads(hf_get("physical/physical.json"))["results"]:
         physical_index.setdefault(str(row["match_id"]), []).append(row)
 
-    print(f"Ingesting {len(match_ids)} match(es) from {args.hf_repo} (apply={args.apply})")
+    print(f"Ingesting {len(match_ids)} match(es) from {args.hf_repo} (apply={args.apply}); {len(skipped)} skipped")
     s3 = boto3.client("s3")
     metas: list[dict] = []
     uploaded = 0
@@ -127,9 +150,9 @@ def main() -> None:
 
     if args.apply and metas:
         skip_ids = public_player_ids(s3, args.bucket)
-        players, skipped = derive_players(metas, skip_ids)
-        if skipped:
-            print(f"NOTE: {len(skipped)} player id(s) already public — skipped")
+        players, players_skipped = derive_players(metas, skip_ids)
+        if players_skipped:
+            print(f"NOTE: {len(players_skipped)} player id(s) already public — skipped")
         if players:
             with tempfile.TemporaryDirectory(prefix="sc-raw-players-") as tmp:
                 players_file = Path(tmp) / "players.json"

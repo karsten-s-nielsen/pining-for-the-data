@@ -11,6 +11,7 @@ import pytest
 from formats.skillcorner_canonical import (
     TRACKING_SCHEMA,
     events_csv_to_parquet,
+    events_parquet_to_parquet,
     frames_equivalent,
     parquet_to_tracking,
     physical_json_to_per_match_parquet,
@@ -173,6 +174,42 @@ def test_events_lossy_cast_aborts():
     # 'index' is int64 in the reference; a non-integral value cannot cast without loss -> abort
     with pytest.raises(pa.ArrowInvalid):
         events_csv_to_parquet(b"index,x_start\n1.5,0\n")
+
+
+def _events_parquet(cols: dict) -> bytes:
+    # Build events Parquet directly from a pyarrow table (no pandas index column) — mirrors the
+    # parquet-family dynamic/*.parquet source shape.
+    buf = io.BytesIO()
+    pq.write_table(pa.table(cols), buf, compression="snappy")
+    return buf.getvalue()
+
+
+def test_events_parquet_conforms_shared_columns_and_keeps_extras():
+    out = events_parquet_to_parquet(
+        _events_parquet({"index": [1, 2], "x_start": [0.5, 1.5], "new_metric": [9.9, None]})
+    )
+    t = pq.read_table(io.BytesIO(out))
+    assert str(t.schema.field("index").type) == "int64"
+    assert str(t.schema.field("x_start").type) == "double"
+    assert "new_metric" in t.schema.names
+    assert t.num_rows == 2
+    # conformed events are zstd, like the CSV path
+    assert pq.read_metadata(io.BytesIO(out)).row_group(0).column(0).compression.lower() == "zstd"
+
+
+def test_events_parquet_and_csv_produce_identical_schema():
+    # Same logical columns via either source family must yield an identical event schema.
+    from_parquet = pq.read_table(
+        io.BytesIO(events_parquet_to_parquet(_events_parquet({"index": [1, 2], "x_start": [0.5, 1.5]})))
+    )
+    from_csv = pq.read_table(io.BytesIO(events_csv_to_parquet(b"index,x_start\n1,0.5\n2,1.5\n")))
+    assert from_parquet.schema.equals(from_csv.schema)
+
+
+def test_events_parquet_lossy_cast_aborts():
+    # 'index' is int64 in the reference; a fractional value cannot cast without loss -> abort
+    with pytest.raises(pa.ArrowInvalid):
+        events_parquet_to_parquet(_events_parquet({"index": [1.5], "x_start": [0.0]}))
 
 
 def test_physical_split_by_match_id():

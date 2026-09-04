@@ -1,6 +1,6 @@
 [project]
 name = "pining-for-the-data"
-version = "0.5.0"
+version = "0.6.0"
 description = "Open soccer tracking data — redistribution, validation, and mock provider API"
 readme = "README.md"
 requires-python = ">=3.12"

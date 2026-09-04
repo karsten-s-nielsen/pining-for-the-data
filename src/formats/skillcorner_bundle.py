@@ -9,6 +9,7 @@ docs/superpowers/specs/2026-06-29-skillcorner-restricted-realmadrid-owner-tier-d
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -108,6 +109,50 @@ def missing_required(root: Path, match_id: str) -> list[str]:
     """Required roles whose source file is absent. physical/freeze are optional and ignored."""
     files = source_files(root, match_id)
     return sorted(role for role in REQUIRED_ROLES if not files[role].is_file())
+
+
+# role -> (source subdir, extension) for the parquet-processed family (RealMadrid24-25,
+# PremierLeague24-25). `events` is the already-Parquet dynamic/*.parquet (conformed to the pinned
+# reference downstream); `physical` is per-match Parquet and OPTIONAL (PL 24/25 ships none);
+# `freeze` is intentionally excluded — dropped from the canonical output (ADR 0011).
+PARQUET_ROLE_LAYOUT: dict[str, tuple[str, str]] = {
+    "metadata": ("meta", ".json"),
+    "tracking": ("tracking", ".json"),
+    "events": ("dynamic", ".parquet"),
+    "physical": ("physical", ".parquet"),
+}
+
+
+def parquet_role_files(match_id: str) -> dict[str, str]:
+    """Map each per-match role to its source-relative path in the parquet-processed layout."""
+    return {role: f"{sub}/{match_id}{ext}" for role, (sub, ext) in PARQUET_ROLE_LAYOUT.items()}
+
+
+def partition_ingestible(
+    match_ids: list[str],
+    role_size: Callable[[str, str], int | None],
+) -> tuple[list[str], dict[str, str]]:
+    """Split candidate match ids into (ingestible, {skipped_id: reason}).
+
+    A match is ingestible iff every REQUIRED_ROLE (metadata/tracking/events) is present and its
+    tracking body is non-empty. ``role_size(match_id, role)`` returns the source byte size, or None
+    if that role's file is absent. Source-family agnostic — the caller supplies role_size from a
+    raw-JSON or parquet-family file inventory — so both ingest adapters skip defective matches up
+    front (Champions League zero-byte tracking / missing events, PL 24/25 events-less matches)
+    instead of crashing mid-ingest. `physical`/`freeze` are never required and never cause a skip.
+    """
+    good: list[str] = []
+    skipped: dict[str, str] = {}
+    for mid in match_ids:
+        sizes = {role: role_size(mid, role) for role in sorted(REQUIRED_ROLES)}
+        absent = sorted(role for role, size in sizes.items() if size is None)
+        if absent:
+            skipped[mid] = f"missing {absent}"
+        elif sizes["tracking"] == 0:
+            skipped[mid] = "tracking empty (0 bytes)"
+        else:
+            good.append(mid)
+    return good, skipped
 
 
 def players_from_meta(meta: dict) -> list[dict]:

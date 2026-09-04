@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-03
+
+### Added
+- **Parquet-processed-family SkillCorner ingest** — `scripts/upload_skillcorner_parquet.py`, the canonical owner-tier ingest adapter for the parquet-processed source layout (`meta/*.json`, `tracking/*.json`, already-Parquet `dynamic/*.parquet` events, optional `physical/*.parquet`; `freeze/` dropped). This completes canonical ingest for **all four** SkillCorner source shapes — v0.5.0 shipped only the raw-JSON family (`upload_skillcorner_raw.py`) and the in-place migration, leaving the parquet family unrunnable. Loads directly to the canonical set (`format_version=2`) via the existing `upload_game`.
+- `formats.skillcorner_canonical.events_parquet_to_parquet` — conforms already-Parquet events to the **same** pinned reference schema as the CSV path, via a shared `_conform_events_table` (the two event paths now differ only in how the Arrow table is read). Verified on real data: Premier League 2024/25 events (294 cols) match Premier League 2025/26 events on all 294 shared columns with **zero type drift** — one event schema across source families and seasons, no Hyrum's-Law surprise for the lakehouse consumer.
+- `formats.skillcorner_bundle.partition_ingestible` — a source-family-agnostic completeness gate that splits candidate matches into ingestible vs skipped-with-reason from an HF file-size inventory, enforcing `REQUIRED_ROLES` (metadata/tracking/events) plus non-empty tracking. Both adapters now skip defective matches **up front** — a defective body is never downloaded or parsed — instead of crashing mid-ingest. Plus `PARQUET_ROLE_LAYOUT` / `parquet_role_files` for the parquet-family role mapping.
+- Two owner-tier SkillCorner datasets loaded (`skillcorner` provider, `visibility=private`): **Premier League 2024/25** (378 of 380 matches; 2 events-less matches skipped) and **UEFA Champions League 2025/26** (143 of 151; 8 defective skipped — the 2025-12-10 cluster of zero-byte tracking, a missing-tracking match, a missing-events match, and one match absent entirely). The owner-tier index grows to **889 matches** (98 Real Madrid + 270 PL 2025/26 + 378 PL 2024/25 + 143 Champions League); merged player catalogue **2439**. Live-API verify: all 889 canonical.
+
+### Changed
+- `scripts/upload_skillcorner_raw.py` — hardened to skip defective matches via `partition_ingestible` before ingest. The raw adapter previously assumed every manifest match was complete (true for Premier League 2025/26, false for the Champions League delivery); no behaviour change for a clean delivery.
+- Test count: 368 → 379 (+11 unit tests — the Parquet events conform and cross-family schema-identity, the parquet-family adapter transform, and the ingestibility gate's skip cases; wholly-synthetic fixtures only).
+- Documentation: ARCHITECTURE.md, CLAUDE.md and the C4 architecture diagram updated for the parquet-family adapter and the completed four-shape ingest (the C4 gains a `SkillCorner Parquet-Family Ingest Orchestrator` container).
+
+### Fixed
+- Both SkillCorner ingest adapters now emit UTF-8 on stdout, so logging a non-ASCII team name (e.g. Champions League clubs such as *Qarabağ FK*) no longer crashes on a legacy console codepage — cp1252 cannot encode `ğ`. The Champions League dry-run surfaced this; Premier League deliveries (ASCII names) never did.
+
 ## [0.5.0] - 2026-09-02
 
 ### Added

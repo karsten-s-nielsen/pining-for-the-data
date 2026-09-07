@@ -50,6 +50,9 @@ Thumbs.db
 *.csv
 !src/tests/fixtures/*.csv
 
+# StatsBomb open-data fetch cache (licensed raw JSON — never commit)
+.sb-open-cache/
+
 # Video files (never commit)
 *.mp4
 *.mov

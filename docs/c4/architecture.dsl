@@ -9,7 +9,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             ingestCli = container "Ingest CLI" "Validates SkillCorner V3 match JSON + tracking JSONL" "Python 3.12+, pining-ingest"
             rosterCli = container "Roster Generator CLI" "Generates synthetic rosters with fictional identities for de-identification" "Python 3.12+, pining-generate-roster"
             deidentify = container "De-identification Engine" "Two-layer jersey-to-identity mapping using fictional name pools" "Python 3.12+"
-            formats = container "Format Handlers" "Validate SkillCorner V3; parse bundle/DFL/StatsBomb metadata for the index; re-nest the StatsBomb 360 delivery (ADR 0010); transform owner-tier SkillCorner to the canonical Parquet/zstd set (ADR 0011)" "Python 3.12+, JSON/JSONL/XML/Parquet"
+            formats = container "Format Handlers" "Validate SkillCorner V3; parse bundle/DFL/StatsBomb metadata for the index; re-nest the StatsBomb 360 delivery (ADR 0010); reshape the StatsBomb open-data family (statsbomb_open.py, ADR 0012 — the purest ADR-0010 case: the real published feed, no de-pivot/join/resolution); shared staging.py extraction used by both StatsBomb families; transform owner-tier SkillCorner to the canonical Parquet/zstd set (ADR 0011)" "Python 3.12+, JSON/JSONL/XML/Parquet"
             uploadCli = container "Upload CLI (Matches)" "Uploads game artifacts; --visibility public|private; validates against MatchEntry Pydantic model" "Python 3.12+, boto3, pining-upload"
             uploadPlayersCli = container "Upload CLI (Players)" "Canonical-JSON-only player catalogue uploads; rejects CSV with reference to Gradient Sports orchestrator" "Python 3.12+, boto3, pining-upload-players"
             publishCli = container "Publish CLI" "Pushes Parquet files and dataset cards to HuggingFace Hub" "Python 3.12+, huggingface_hub, pining-publish"
@@ -24,7 +24,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             skillcornerParquetOrchestrator = container "SkillCorner Parquet-Family Ingest Orchestrator" "One-shot script: ingest a parquet-processed SkillCorner delivery (RM, PL 24/25) into the canonical owner tier (format_version=2), skipping events-less matches; drive uploadCli + uploadPlayersCli" "Python 3.12+, scripts/upload_skillcorner_parquet.py"
             skillcornerCanonicalVerify = container "SkillCorner Canonical Verify Script" "Post-load HTTP verification: tracking is Parquet, freeze_frames 404s, format_version=2, required artifacts fetch" "Python 3.12+, scripts/verify_skillcorner_canonical_load.py"
             statsbombOrchestrator = container "StatsBomb Orchestrator" "One-shot script: delivery-coherence pre-flight, de-pivot + re-nest the match row to feed shape, stage/gzip the four role-aligned artifacts, drive uploadCli + uploadPlayersCli (owner tier)" "Python 3.12+, scripts/upload_statsbomb_club.py"
-            statsbombVerify = container "StatsBomb Verify Script" "Post-load HTTP verification: owner-vs-public tier split, exact artifact key set (events, freeze_frames, roster, metadata), metadata envelope shape, Range GET for large bodies" "Python 3.12+, scripts/verify_statsbomb_load.py"
+            statsbombOpenOrchestrator = container "StatsBomb Open-Data Orchestrator" "One-shot script: fetch+cache the real open-data feed over raw HTTPS, delivery-coherence pre-flight, build_metadata_open reshape (no de-pivot/join — the real feed), same-tier skip-and-report players, two-dir stage of the four role artifacts, drive uploadCli + uploadPlayersCli (owner tier, provenance=redistributed, ADR 0012)" "Python 3.12+, scripts/upload_statsbomb_open.py"
+            statsbombVerify = container "StatsBomb Verify Script" "Post-load HTTP verification: owner-vs-public tier split, exact artifact key set (events, freeze_frames, roster, metadata), metadata envelope shape, Range GET for large bodies; also samples one provenance=redistributed open-data match (owner sees it; public gets 404)" "Python 3.12+, scripts/verify_statsbomb_load.py"
 
             apiGateway = container "API Gateway" "REST API with bearer token auth, throttled (10 rps / 50 burst)" "AWS API Gateway HTTP API"
             lambdaProviders = container "list_providers Lambda" "Returns provider catalogue (tier-blind)" "AWS Lambda, Python 3.12"
@@ -58,7 +59,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         gradientSports = softwareSystem "Gradient Sports" "Source of restricted FIFA WC 2022 dataset; operator has download access" "External"
         idsse = softwareSystem "IDSSE / DFL Open Data" "CC-BY 4.0 Bundesliga tracking + event data (Bassek et al. 2025); version-pinned figshare release, provided with DFL/Sportec authorization" "External"
         skillcornerRestricted = softwareSystem "SkillCorner Restricted Bundle" "Restricted SkillCorner multi-artifact tracking bundle (owner tier); operator has a licensed copy" "External"
-        statsbomb = softwareSystem "StatsBomb" "Commercial StatsBomb 360 (owner tier)" "External"
+        statsbomb = softwareSystem "StatsBomb" "Commercial 360 club delivery (owner tier) + public open-data tournaments (github.com/statsbomb/open-data; redistribution restricted — owner tier)" "External"
 
         analyst -> huggingface "Downloads tracking data" "load_dataset() / HTTPS"
         developer -> apiGateway "Tests ingestion adapters against the mock API" "HTTPS + public bearer token"
@@ -77,6 +78,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         operator -> skillcornerParquetOrchestrator "Ingests a parquet-processed SkillCorner delivery (owner tier)" "Shell"
         operator -> skillcornerCanonicalVerify "Runs canonical-format post-load verification" "Shell"
         operator -> statsbombOrchestrator "Loads the commercial StatsBomb 360 delivery (owner tier)" "Shell"
+        operator -> statsbombOpenOrchestrator "Loads the open-data tournament 360 (owner tier)" "Shell"
         operator -> statsbombVerify "Runs StatsBomb post-load verification" "Shell"
         operator -> ssmParam "Sets owner token (out-of-band)" "aws ssm put-parameter"
 
@@ -87,6 +89,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         huggingface -> skillcornerRawOrchestrator "Source raw-JSON SkillCorner dataset (operator-entitled HF repo)" "HTTPS"
         huggingface -> skillcornerParquetOrchestrator "Source parquet-processed SkillCorner dataset (operator-entitled HF repo)" "HTTPS"
         statsbomb -> statsbombOrchestrator "Source club file drop (operator-downloaded copy)" "Filesystem"
+        statsbomb -> statsbombOpenOrchestrator "Fetches the public open-data 360 feed over raw HTTPS (cached)" "HTTPS"
 
         ingestCli -> formats "Validates match + tracking files" "Python import"
         rosterCli -> deidentify "Generates synthetic rosters" "Python import"
@@ -117,6 +120,9 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         statsbombOrchestrator -> formats "Reads, de-pivots and re-nests the delivered bundle (ADR 0010)" "Python import"
         statsbombOrchestrator -> uploadCli "Drives per-match upload (visibility=private)" "Python import"
         statsbombOrchestrator -> uploadPlayersCli "Drives player catalogue upload (visibility=private)" "Python import"
+        statsbombOpenOrchestrator -> formats "Reshapes the real open feed to canonical metadata (ADR 0012)" "Python import"
+        statsbombOpenOrchestrator -> uploadCli "Drives per-match upload (visibility=private, provenance=redistributed)" "Python import"
+        statsbombOpenOrchestrator -> uploadPlayersCli "Drives player catalogue upload; same-tier skip-and-report (visibility=private)" "Python import"
         statsbombVerify -> apiGateway "Polls endpoints with both tokens; asserts post-conditions" "HTTPS"
 
         apiGateway -> lambdaProviders "GET /v1/providers" "Lambda proxy"
@@ -201,6 +207,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
                 containerInstance skillcornerRawOrchestrator
                 containerInstance skillcornerCanonicalVerify
                 containerInstance statsbombOrchestrator
+                containerInstance statsbombOpenOrchestrator
                 containerInstance statsbombVerify
                 containerInstance canonicalModels
                 containerInstance schemas
@@ -263,7 +270,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         }
 
         container pining "Containers_StatsBomb" {
-            include operator statsbomb statsbombOrchestrator statsbombVerify
+            include operator statsbomb statsbombOrchestrator statsbombOpenOrchestrator statsbombVerify
             include formats uploadCli uploadPlayersCli dataBucket apiGateway
             autoLayout
         }

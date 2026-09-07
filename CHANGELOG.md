@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-06
+
+### Added
+- **StatsBomb open-data tournaments** ingested as a **second source family** under the existing owner-tier `statsbomb` provider (`visibility="private"`, **`provenance="redistributed"`**) — StatsBomb's public open-data 360 corpus for the six competitions whose 360 coverage is a *complete tournament*: FIFA World Cup 2022, Women's World Cup 2023, UEFA Euro 2020, UEFA Euro 2024, UEFA Women's Euro 2022, UEFA Women's Euro 2025 (**292 matches** with 360; net ingest **291** — one match's 360 file is NUL-corrupted in StatsBomb's upstream open data and is skipped-and-reported, see below). The data is freely accessible but **not freely redistributable** under the StatsBomb Public Data User Agreement, so it lives at the owner tier as a single-user (party-of-one) re-host — there is deliberately **no public tier**. `provenance` (not tier) distinguishes the two same-slug families: the commercial 360 delivery stays `provenance="original"`, the open data is `redistributed`; each match's `source.licence` records which agreement governs it. This is a new `redistributed`+`private` combination. No new provider slug and no Lambda/Terraform change (a provider is an S3 prefix).
+- `src/formats/statsbomb_open.py` — pure, stdlib-only open-data adapter: the committed six-tournament selection constant, per-match bundle assembly from the fetched real feed, and `build_metadata_open`, which reshapes the already-nested open match object to the **same canonical metadata schema** the commercial family emits (one slug, one metadata shape). Being the real published feed, the open family is the purest ADR 0010 case — no de-pivot, no competition join, no team-id resolution, no lineup-gender helper. Richer feed slots the commercial path hard-nulls (real stadium/referee/manager ids, `country`, `home_team_group`) are populated from inside the match object, never invented (ADR 0010 honesty preserved).
+- `scripts/upload_statsbomb_open.py` — owner-tier open-data loader: fetch+cache the real feed over `urllib.request` from the pinned open-data host (no `statsbombpy`/pandas; `--source-dir` for a local clone, `--cache-dir` for the operator-local cache), a coherence pre-flight per assembled match before any byte is staged, a transposed-`(competition_id, season_id)`-pair guard (fails loud on a real-but-wrong tournament), and **same-tier skip-and-report** on the shared `statsbomb/_private/players.json` so the sparser open record never overwrites a richer commercial one (order-independent, lossless; ADR 0012). **Defect-skip**: a match whose upstream artifact is unparseable / missing / incoherent is skipped with a reported reason (validated before any upload, so a skip never leaves a partial load) and `run()` returns the skipped list — matching the SkillCorner/commercial skip-defective convention. A real-data dry-run over all 292 matches found exactly one defective match (`3845506`, Women's Euro 2022, whose `three-sixty` is NUL-byte corrupted upstream), so net ingest is **291 of 292** until StatsBomb republishes the file (a re-run then picks it up idempotently). `--dry-run` validates all 292 matches with zero S3 calls before `--execute`.
+- `src/mock_api/staging.py` — the artifact-staging concern extracted from `scripts/upload_statsbomb_club.py` and **parameterized by per-family artifact specs**, so both StatsBomb families stage through one shared, spec-driven path (the open family's 360 source file is `three-sixty`, not the commercial `frames.json`, so no file is ever mis-named). Behaviour-preserving for the commercial script.
+- ADR 0012 — StatsBomb open-data as a second source family: records D-1 (same slug, `provenance="redistributed"`, the new `redistributed`+`private` combination), D-2 (faithful gzip JSON; ADR 0011-style Parquet considered and rejected on the measured ~80 MB corpus saving), D-5 (same-tier skip-and-report to protect the richer record), and D-7 (single-user owner-tier licence basis — no public tier without StatsBomb's express written consent). The loader also **skips-and-reports defective upstream matches** (an unparseable/missing/incoherent artifact), matching the SkillCorner/commercial convention. Upholds ADR 0010 (not amended — the open feed is its purest application) and uses ADR 0008's artifact vocabulary as written.
+
+### Changed
+- Test count: 379 → 407 (+28 unit tests — the open-data reader reshape/selection/player paths (incl. field-level open-path assertions closing the §7 table: sparse `dob`/`height`→null + no-name-split, missing-`match_date` raises, str id types, order-independent skip), the upload script's assembly / coherence pre-flight / transposed-pair guard / same-tier skip-and-report / defective-match skip-and-report / validate-vs-upload split (upload errors are not mis-reported as defects), and the extracted shared staging module; wholly-invented fixtures only — no licensed id, and no real person's attributes, are committed).
+- Documentation: README, ARCHITECTURE.md, CLAUDE.md, `docs/api-reference.md` and the ADR index updated for the StatsBomb open-data second source family and the `redistributed`+`private` combination. `.sb-open-cache/` added to `.gitignore` (defense-in-depth against staging licensed raw JSON).
+
 ## [0.6.0] - 2026-09-03
 
 ### Added
@@ -137,7 +150,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ARCHITECTURE.md with C4 diagrams
 - CI pipeline (ruff, pyright, pytest) via GitHub Actions
 
-[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.1.0...v0.2.0

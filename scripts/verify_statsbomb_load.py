@@ -115,6 +115,11 @@ def _check_metadata_shape(body: bytes, failures: list[str]) -> None:
         print("OK: metadata is a single object in feed shape")
 
 
+def select_redistributed(matches: list[dict]) -> list[dict]:
+    """Owner-visible matches whose provenance marks them open-data (spec §8)."""
+    return [m for m in matches if m.get("provenance") == "redistributed"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify the restricted StatsBomb owner-tier load")
     parser.add_argument("--api", required=True, help="API base URL (no trailing slash)")
@@ -187,6 +192,28 @@ def main() -> int:
                 print(f"OK: public {artifact} -> 404 (no existence leak)")
             else:
                 failures.append(f"public {mid}/{artifact}: expected 404, got {p_status}")
+
+    # Smoke check: sample one open-data (provenance="redistributed") match, if present.
+    # A commercial-only load has none, so absence is a note — never a hard failure.
+    redistributed = select_redistributed(owner_matches)
+    if redistributed:
+        print(f"OK: owner sees {len(redistributed)} redistributed (open-data) match(es)")
+        sample = redistributed[0]
+        mid = sample["id"]
+        if set(sample.get("artifacts", {})) != EXPECTED_ARTIFACTS:
+            failures.append(
+                f"redistributed {mid} artifact keys {sorted(sample.get('artifacts', {}))} "
+                f"!= {sorted(EXPECTED_ARTIFACTS)}"
+            )
+        # Reuse the same public-404 leak assertion as the restricted sample.
+        for artifact in sorted(sample.get("artifacts", {})):
+            p_status, _ = _status_or_presigned(args.api, f"/{PROVIDER}/matches/{mid}/{artifact}", args.public_token)
+            if p_status != 404:
+                failures.append(f"public {mid}/{artifact}: expected 404, got {p_status}")
+        if mid in public_ids:
+            failures.append(f"redistributed id {mid} visible to public token")
+    else:
+        print("note: no redistributed matches present (open-data load not yet run)")
 
     owner_players = get_json(args.api, f"/{PROVIDER}/players", args.owner_token).get("players", [])
     if not owner_players:

@@ -204,3 +204,143 @@ def sb_bundle_dir(
         return root
 
     return _build
+
+
+# --- StatsBomb OPEN-DATA synthetic fixtures (spec 2026-09-06) --------------------
+# Real-feed shape (nested match object, raw arrays). Every id/name/date invented.
+
+
+@pytest.fixture
+def sbo_match() -> dict:
+    """A synthetic open-data match object in real feed shape."""
+    return {
+        "match_id": 8888888,
+        "match_date": "2026-07-15",
+        "kick_off": "18:00:00.000",
+        "competition": {"competition_id": 555555, "country_name": "Europa", "competition_name": "Continental Cup"},
+        "season": {"season_id": 777, "season_name": "2026"},
+        "home_team": {
+            "home_team_id": 60001,
+            "home_team_name": "Northmoor United",
+            "home_team_gender": "male",
+            "home_team_group": "A",
+            "country": {"id": 900, "name": "Northmoor"},
+            "managers": [
+                {
+                    "id": 5001,
+                    "name": "Alex Gaffer",
+                    "nickname": None,
+                    "dob": "1970-01-01",
+                    "country": {"id": 900, "name": "Northmoor"},
+                }
+            ],
+        },
+        "away_team": {
+            "away_team_id": 60002,
+            "away_team_name": "Southford City",
+            "away_team_gender": "male",
+            "away_team_group": None,
+            "country": {"id": 901, "name": "Southford"},
+            "managers": [
+                {
+                    "id": 5002,
+                    "name": "Sam Boss",
+                    "nickname": None,
+                    "dob": "1972-02-02",
+                    "country": {"id": 901, "name": "Southford"},
+                }
+            ],
+        },
+        "home_score": 2,
+        "away_score": 1,
+        "match_status": "available",
+        "match_status_360": "available",
+        "last_updated": "2026-07-16T00:00:00.000000",
+        "last_updated_360": "2026-07-16T00:10:00.000000",
+        "metadata": {"data_version": "1.1.0", "shot_fidelity_version": "2", "xy_fidelity_version": "2"},
+        "match_week": 3,
+        "competition_stage": {"id": 10, "name": "Group Stage"},
+        "stadium": {"id": 4001, "name": "Northmoor Arena", "country": {"id": 900, "name": "Northmoor"}},
+        "referee": {"id": 3001, "name": "Ref Whistle", "country": {"id": 902, "name": "Elsewhere"}},
+    }
+
+
+@pytest.fixture
+def sbo_events() -> list[dict]:
+    """Coherent open event stream: two periods, a Half End, exactly two teams."""
+    return [
+        {
+            "id": "e1",
+            "period": 1,
+            "type": {"name": "Pass"},
+            "team": {"id": 60001, "name": "Northmoor United"},
+            "player": {"id": 70001, "name": "Player One"},
+        },
+        {
+            "id": "e2",
+            "period": 2,
+            "type": {"name": "Pass"},
+            "team": {"id": 60002, "name": "Southford City"},
+            "player": {"id": 70002, "name": "Player Two"},
+        },
+        {"id": "e3", "period": 2, "type": {"name": "Half End"}, "team": {"id": 60001, "name": "Northmoor United"}},
+    ]
+
+
+@pytest.fixture
+def sbo_frames() -> list[dict]:
+    """three-sixty payload: one frame joined to event e1."""
+    return [
+        {
+            "event_uuid": "e1",
+            "visible_area": [0.0, 0.0, 120.0, 0.0, 120.0, 80.0, 0.0, 80.0, 0.0, 0.0],
+            "freeze_frame": [
+                {"teammate": True, "actor": True, "keeper": False, "location": [60.0, 40.0]},
+                {"teammate": False, "actor": False, "keeper": True, "location": [2.0, 40.0]},
+            ],
+        }
+    ]
+
+
+@pytest.fixture
+def sbo_lineups() -> list[dict]:
+    """Open lineups: NO birth_date / player_height / player_gender (open feed lacks them)."""
+    return [
+        {
+            "team_id": 60001,
+            "team_name": "Northmoor United",
+            "lineup": [
+                {
+                    "player_id": 70001,
+                    "player_name": "Player One",
+                    "player_nickname": "P1",
+                    "jersey_number": 10,
+                    "country": {"id": 900, "name": "Northmoor"},
+                    "positions": [{"position_id": 21, "position": "Left Wing", "from": "00:00", "from_period": 1}],
+                },
+            ],
+        },
+        {
+            "team_id": 60002,
+            "team_name": "Southford City",
+            "lineup": [
+                {
+                    "player_id": 70002,
+                    "player_name": "Player Two",
+                    "player_nickname": "",
+                    "jersey_number": 7,
+                    "country": {"id": 901, "name": "Southford"},
+                    "positions": [],
+                },
+            ],
+        },
+    ]
+
+
+@pytest.fixture
+def sbo_season_matches(sbo_match) -> list[dict]:
+    """A season file: one 360-available match (competition 55) + one unscheduled."""
+    other = dict(sbo_match)
+    other["match_id"] = 8888889
+    other["match_status_360"] = "unscheduled"
+    return [sbo_match, other]

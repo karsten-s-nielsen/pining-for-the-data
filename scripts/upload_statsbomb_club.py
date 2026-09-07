@@ -11,10 +11,8 @@ never committed).
 from __future__ import annotations
 
 import argparse
-import gzip
 import json
 import os
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -36,6 +34,7 @@ from formats.statsbomb import (  # noqa: E402
     resolve_team_ids,
     team_gender,
 )
+from mock_api.staging import stage_artifacts  # noqa: E402
 from mock_api.upload import upload_game  # noqa: E402
 from mock_api.upload_players import upload_players  # noqa: E402
 
@@ -45,12 +44,6 @@ SOURCE_LICENCE = "Restricted; redistribution not permitted"
 
 # Probe value only — upload_players stamps the real timestamp on write.
 _VALIDATION_PROBE_TIMESTAMP = "1970-01-01T00:00:00Z"
-
-
-def _gzip_file(src: Path, dest: Path) -> None:
-    """Stream-gzip src -> dest in 1 MiB chunks (never loads the body into memory)."""
-    with src.open("rb") as f_in, gzip.open(dest, "wb") as f_out:
-        shutil.copyfileobj(f_in, f_out, length=1 << 20)
 
 
 def _validate_players(players: list[dict]) -> None:
@@ -65,23 +58,8 @@ def _validate_players(players: list[dict]) -> None:
 
 
 def stage_bundle(bundle: Bundle, staging: Path, metadata: dict) -> None:
-    """Stage the four role-aligned artifacts.
-
-    Compression rule (spec §3): gzip the multi-megabyte bodies (events, freeze
-    frames), stage the kilobyte ones plain. `metadata` is passed in already built —
-    every fallible step runs before staging opens.
-    """
-    for _role, source_name, staged_name in ARTIFACT_SPECS:
-        src = bundle.root / source_name
-        dest = staging / staged_name
-        if staged_name.endswith(".gz"):
-            _gzip_file(src, dest)
-        else:
-            shutil.copyfile(src, dest)
-
-    (staging / STAGED_METADATA_FILENAME).write_text(
-        json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    """Stage the four role-aligned artifacts (delegates to the shared stager)."""
+    stage_artifacts(bundle.root, staging, ARTIFACT_SPECS, metadata, STAGED_METADATA_FILENAME)
 
 
 def upload_bundle(root: Path, bucket: str) -> tuple[str, int]:

@@ -6,14 +6,14 @@ Companion repo to luxury-lakehouse.
 ## Architecture
 
 - `src/deidentify/` — name pools, roster generation, two-layer jersey→identity mapping
-- `src/formats/` — provider format readers/writers (SkillCorner V3 JSON/JSONL, SkillCorner multi-artifact bundle + raw-JSON family for restricted owner-tier data, IDSSE/Sportec DFL XML, StatsBomb commercial 360 club bundle for restricted owner-tier data, Respo.Vision JSON future). Owner-tier SkillCorner is stored as the canonical columnar Parquet/zstd set (nested `tracking.parquet`, `events`/`physical` Parquet, freeze dropped, per-match `format_version` marker — ADR 0011; pure transforms in `skillcorner_canonical.py`)
+- `src/formats/` — provider format readers/writers (SkillCorner V3 JSON/JSONL, SkillCorner multi-artifact bundle + raw-JSON family for restricted owner-tier data, IDSSE/Sportec DFL XML, StatsBomb commercial 360 club bundle + open-data tournaments family (`statsbomb_open.py`) for restricted owner-tier data, Respo.Vision JSON future). Owner-tier SkillCorner is stored as the canonical columnar Parquet/zstd set (nested `tracking.parquet`, `events`/`physical` Parquet, freeze dropped, per-match `format_version` marker — ADR 0011; pure transforms in `skillcorner_canonical.py`). The two StatsBomb source families share one faithful-feed gzip-JSON shape (ADR 0010) and one artifact vocabulary; the open family (`statsbomb_open.py`) is the purest ADR-0010 case (the real published feed — no de-pivot/join/resolution) and is served `provenance="redistributed"` (ADR 0012)
 - `src/publish/` — HuggingFace Hub dataset publishing
 - `src/mock_api/` — Upload CLIs (pining-upload, pining-upload-players)
 - `src/tests/` — pytest test suite
 - `schemas/` — Published JSON Schemas for `matches.json` and `players.json` (generated from Pydantic models in `src/canonical/models.py`; drift-tested in CI; models kept out of the Lambda zip so the runtime stays pydantic-free)
 - `src/canonical/` — Canonical Pydantic models (`MatchEntry`, `PlayerRecord`); imported by upload CLIs + schema regenerator + tests
 - `scripts/` — One-shot ops scripts, grouped by role:
-  - Per-provider load + post-load verify pairs: `upload_gradient_wc2022.py` / `verify_gradient_load.py`, `upload_idsse_bundesliga.py` / `verify_idsse_load.py`, `upload_statsbomb_club.py` / `verify_statsbomb_load.py`
+  - Per-provider load + post-load verify pairs: `upload_gradient_wc2022.py` / `verify_gradient_load.py`, `upload_idsse_bundesliga.py` / `verify_idsse_load.py`. StatsBomb has two source-family loaders sharing one verify: `upload_statsbomb_club.py` (commercial 360, `provenance="original"`) and `upload_statsbomb_open.py` (open-data tournaments, `provenance="redistributed"`, ADR 0012; fetch+cache the real feed, coherence pre-flight, same-tier skip-and-report players) / `verify_statsbomb_load.py`
   - Owner-tier SkillCorner canonical ingest (Parquet/zstd, ADR 0011) — two source-family adapters sharing one verify: `upload_skillcorner_raw.py` (raw-JSON family: Champions League, Premier League 25/26) and `upload_skillcorner_parquet.py` (parquet-processed family: Real Madrid, Premier League 24/25), both `format_version=2` and skipping defective matches (missing a required role, or zero-byte tracking) up front via `partition_ingestible`; `verify_skillcorner_canonical_load.py` (canonical post-load HTTP verify). The legacy v0.3.0 RM loader `upload_skillcorner_realmadrid.py` / `verify_skillcorner_realmadrid_load.py` is retained (RM was migrated in place to the canonical set)
   - Shared: `_verify_http.py` (HTTP helpers the verify scripts import), `regenerate_schemas.py` (drift-tested in CI)
   - Completed one-shot migrations against live S3 state, retained as the audit trail for changes already applied (each is idempotent and safe to re-run): `backfill_skillcorner_artifacts.py` (legacy array-form artifacts → canonical object form), `migrate_skillcorner_tracking_parquet.py` (owner-tier tracking → nested Parquet, events/physical → zstd, freeze dropped — ADR 0011; stored-object-gated), `migrate_pff_to_gradientsports.py` and `migrate_gradientsports_slug.py` (the two provider-slug renames)
@@ -64,7 +64,9 @@ The mock API serves two visibility tiers:
 - **Owner tier**: bearer token stored in SSM Parameter Store SecureString (`/pining-for-the-data/api_token_owner`). Serves restricted private-tier content (e.g., Gradient Sports). Set out-of-band via `aws ssm put-parameter`; never committed.
 
 Owner-tier providers: `gradientsports` (Gradient Sports), `skillcorner` private tier
-(restricted Real Madrid), `statsbomb` (commercial 360 club delivery — ADR 0010).
+(restricted Real Madrid), `statsbomb` (commercial 360 club delivery, `provenance="original"`
+— ADR 0010; plus open-data tournaments, `provenance="redistributed"` — ADR 0012). Both
+StatsBomb source families are owner-tier only; `provenance` distinguishes them.
 
 `validate_token` (in `terraform/modules/functions/src/shared.py`) returns a `Tier` enum (`PUBLIC` or `OWNER`); handlers filter responses by tier. Tier mismatch returns uniform `404` (not `403`) to avoid existence leaks. Duplicate-token misconfiguration classifies as `PUBLIC` (fail closed).
 

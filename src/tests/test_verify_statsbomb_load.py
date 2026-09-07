@@ -98,3 +98,13 @@ def test_undecodable_utf8_records_a_failure_instead_of_raising(vmod) -> None:
     vmod._check_metadata_shape(b"\xff\xfe", failures)
     assert len(failures) == 1
     assert "not decodable JSON" in failures[0]
+
+
+def test_select_redistributed_filters_by_provenance(vmod) -> None:
+    """Only entries whose provenance marks them open-data are selected (spec §8)."""
+    matches = [
+        {"id": "1", "provenance": "original"},
+        {"id": "2", "provenance": "redistributed"},
+        {"id": "3"},
+    ]
+    assert [m["id"] for m in vmod.select_redistributed(matches)] == ["2"]

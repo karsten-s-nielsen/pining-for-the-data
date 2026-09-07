@@ -7,7 +7,7 @@
 
 ## 1. Purpose
 
-Tooling and infrastructure to validate, redistribute, and serve soccer tracking data as an open dataset — plus an owner-only tier for restricted data that cannot be redistributed. Four providers are served: `skillcorner` (MIT open data redistributed as-is, plus a restricted multi-artifact bundle on the owner tier), `idsse` (CC-BY 4.0 IDSSE/DFL Bundesliga, redistributed as-is), `gradientsports` (owner tier only), and `statsbomb` (commercial 360, owner tier only). The project also includes a de-identification engine, retained for future use with private/commercial data. Companion to luxury-lakehouse.
+Tooling and infrastructure to validate, redistribute, and serve soccer tracking data as an open dataset — plus an owner-only tier for restricted data that cannot be redistributed. Four providers are served: `skillcorner` (MIT open data redistributed as-is, plus a restricted multi-artifact bundle on the owner tier), `idsse` (CC-BY 4.0 IDSSE/DFL Bundesliga, redistributed as-is), `gradientsports` (owner tier only), and `statsbomb` (two owner-tier source families — commercial 360 `provenance="original"`, plus open-data tournaments `provenance="redistributed"`). The project also includes a de-identification engine, retained for future use with private/commercial data. Companion to luxury-lakehouse.
 
 ---
 
@@ -58,7 +58,7 @@ Only open data reaches HuggingFace Hub. The mock API serves both: the public bea
 
 **Three modes:**
 - **As-is redistribution** (`skillcorner` open data, `idsse`): validate and publish, no transformation
-- **Access-gated serving** (restricted `skillcorner`, `gradientsports`, `statsbomb`): loaded to the owner tier only, never redistributed. Small metadata files are parsed to build the index. Large bodies are generally served as delivered, reshaped only where the source differs from the provider's own feed shape (ADR 0010) — the exception is owner-tier `skillcorner`, normalized to the canonical columnar Parquet/zstd format (ADR 0011)
+- **Access-gated serving** (restricted `skillcorner`, `gradientsports`, `statsbomb`): loaded to the owner tier only, never redistributed to third parties. Small metadata files are parsed to build the index. Large bodies are generally served as delivered, reshaped only where the source differs from the provider's own feed shape (ADR 0010) — the exception is owner-tier `skillcorner`, normalized to the canonical columnar Parquet/zstd format (ADR 0011). `statsbomb` carries two owner-tier source families under one slug, distinguished by `provenance`: the commercial 360 delivery (`original`) and the open-data tournaments corpus (`redistributed`, ADR 0012) — the latter freely accessible but not freely redistributable, so hosted single-user at the owner tier
 - **De-identification** (future private data): full synthetic identity pipeline via RosterGenerator + TwoLayerMapping — retained, not applied to any currently served provider
 
 ---
@@ -101,7 +101,8 @@ Read and validate provider-specific tracking data.
 | `skillcorner_events_reference.py` | Implemented | SkillCorner (owner tier) | Pinned `{column: Arrow-dtype}` events reference (`schemas/skillcorner_events_reference.json`); the shared conform target so CSV-family and Parquet-family events produce one identical schema across seasons |
 | `skillcorner_raw.py` | Implemented | SkillCorner (raw-JSON family: Champions League 25/26, Premier League 25/26) | Raw-JSON deliveries: manifest-driven discovery + role mapping into the canonical set |
 | `idsse.py` | Implemented | IDSSE / DFL / Sportec | DFL XML (matchinformation parsed for index metadata; positions/events served as-is) |
-| `statsbomb.py` | Implemented | StatsBomb (commercial 360, owner tier) | Club file drop — de-pivots `statsbombpy` column-orient dumps and re-nests the match row to feed shape (ADR 0010); events/frames/lineups served as-is |
+| `statsbomb.py` | Implemented | StatsBomb (commercial 360, owner tier; `provenance="original"`) | Club file drop — de-pivots `statsbombpy` column-orient dumps and re-nests the match row to feed shape (ADR 0010); events/frames/lineups served as-is |
+| `statsbomb_open.py` | Implemented | StatsBomb (open-data tournaments, owner tier; `provenance="redistributed"`) | Second source family under the same slug — six complete-tournament open-data 360 competitions (292 matches). Pure transforms over the real published feed: no de-pivot, no competition join, no team-id resolution; `build_metadata_open` reshapes the already-nested match object to the same canonical metadata schema as the commercial family. Not redistributable (StatsBomb Public Data User Agreement) — owner tier only (ADR 0012) |
 | `respovision.py` | Scaffolded | Respo.Vision | JSON, 3D pose, 50+ keypoints |
 | `convert.py` | Scaffolded | Cross-format | Respo.Vision 3D -> SkillCorner-equivalent 2D |
 

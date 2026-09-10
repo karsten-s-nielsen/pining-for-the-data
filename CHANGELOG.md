@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-09
+
+### Added
+- **Public SkillCorner A-League expansion** — the SkillCorner Open Data repo (`github.com/SkillCorner/opendata`, MIT) now carries **20** A-League Men 2024/25 matches; the **10 not previously published** are redistributed to the existing public `skillcorner` provider (`visibility="public"`, `provenance="redistributed"`, `source.licence="MIT"`), in byte- and artifact-key-parity with the original 10 — each match's four opendata files served as-is under the legacy id-prefixed keys (`{id}_match`, `{id}_tracking_extrapolated`, `{id}_dynamic_events`, `{id}_phases_of_play`; no `format_version`, staying out of the owner-tier-only ADR-0011 canonical Parquet set). The single `skillcorner/matches.json` index (tier-filtered at serve) grows to **20 public + 889 owner-tier** entries.
+- **Public players catalogue** — the original public drop created no `players.json` (it predates the `/players` endpoint). A public `skillcorner/players.json` is now (re)built across **all 20** A-League matches (**307 players**, reusing `players_from_meta` + `derive_players`), so public `/players` is consistent with `/matches`. Any player id that also exists in the owner/private index is **skip-and-reported** for a human re-tiering decision — never silently promoted or dropped — because `upload_players` refuses to re-tier.
+- `src/formats/skillcorner_opendata.py` — pure discovery/role-mapping for the opendata layout (the public-tier peer of `skillcorner_raw.py`): the four id-prefixed artifact suffixes, `discover_match_ids`, `select_new_matches` (idempotent skip), and `match_info`. `match_info` deliberately derives the index `date` from the **UTC calendar date** (`date_time[:10]`) to match the original 10 public entries, rather than reusing `skillcorner_bundle.match_info`, whose Europe/Madrid conversion is correct for owner-tier Real Madrid but wrong for A-League (Australia/NZ).
+- `scripts/upload_skillcorner_opendata.py` / `scripts/verify_skillcorner_opendata_load.py` — a competition-agnostic, idempotent public-tier loader (fetches the opendata repo anonymously, dry-run by default, skips already-live ids, guards against empty artifacts) and its public-tier HTTP verify (public token: 20 matches incl. every new id, `skillcorner` in `/providers`, non-empty `/players`, and a sampled new match serves its four artifacts). Pure transforms are unit-tested; `main` does the HTTP/S3 I/O at the gated ops step.
+
+### Changed
+- Test count: 407 → 432 (+25 unit tests — the opendata reader's role-mapping / selection / UTC-date `match_info`, the loader's injected-`fetch` staging (incl. the empty-artifact guard) and index / player-id readers, and the verify script's pure listing / entry checks; wholly-invented fixtures only — no licensed id or real person's attributes committed).
+- Documentation: `docs/tutorial.md` updated for the 20-match, four-artifact dataset and its access note corrected from the stale "published as Parquet on HuggingFace" claim to the Mock Provider API (public tier) plus the upstream opendata source. CLAUDE.md records the public opendata source family and the loader/verify pair.
+
 ## [0.7.0] - 2026-09-06
 
 ### Added

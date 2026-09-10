@@ -1,6 +1,6 @@
 [project]
 name = "pining-for-the-data"
-version = "0.7.0"
+version = "0.8.0"
 description = "Open soccer tracking data — redistribution, validation, and mock provider API"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -78,6 +78,11 @@ select = [
 "scripts/verify_skillcorner_canonical_load.py" = ["S310"]
 # Shared verifier HTTP helpers: same rationale as the verify_* scripts that import them.
 "scripts/_verify_http.py" = ["S310"]
+# Open-data loader: urllib.request to the pinned raw.githubusercontent.com open-data host
+# is the entire point (S310 false-positive). Matches the upload_statsbomb_open.py rationale.
+"scripts/upload_skillcorner_opendata.py" = ["S310"]
+# Verifier: urllib.request to a configurable HTTPS API endpoint is the entire point (S310 false-positive).
+"scripts/verify_skillcorner_opendata_load.py" = ["S310"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["deidentify", "formats", "publish", "mock_api", "canonical"]

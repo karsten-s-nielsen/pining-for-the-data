@@ -1,6 +1,6 @@
 # Tutorial: Exploring SkillCorner Tracking Data
 
-**Objective:** By the end of this tutorial you will understand the structure of SkillCorner V3 tracking data, validate a game using the CLI, and know how to access the full 10-match dataset.
+**Objective:** By the end of this tutorial you will understand the structure of SkillCorner V3 tracking data, validate a game using the CLI, and know how to access the full 20-match dataset.
 
 **Prerequisites:**
 - Python 3.12+ installed
@@ -13,14 +13,16 @@
 
 ## 1. What You're Looking At
 
-This project redistributes [SkillCorner open tracking data](https://github.com/SkillCorner/opendata) — 10 A-League Men matches from the 2024/2025 season. Each game consists of two files:
+This project redistributes [SkillCorner open tracking data](https://github.com/SkillCorner/opendata) — 20 A-League Men matches from the 2024/2025 season. Each game is redistributed as-is with four files (id-prefixed, e.g. `2016236_match.json`):
 
 | File | Format | Contents |
 |------|--------|----------|
-| `match.json` | JSON | Match metadata — teams, players, pitch dimensions, periods, competition |
-| `tracking.jsonl` | JSONL (one JSON object per line) | Frame-by-frame player and ball positions at 10 frames per second |
+| `<id>_match.json` | JSON | Match metadata — teams, players, pitch dimensions, periods, competition |
+| `<id>_tracking_extrapolated.jsonl` | JSONL (one JSON object per line) | Frame-by-frame player and ball positions at 10 frames per second |
+| `<id>_dynamic_events.csv` | CSV | On-ball events |
+| `<id>_phases_of_play.csv` | CSV | Phases of play (in/out of possession spans) |
 
-The repository includes sample fixtures you can explore without downloading the full dataset.
+This tutorial focuses on the two core files — match metadata and tracking. The repository includes sample fixtures you can explore without downloading the full dataset.
 
 ---
 
@@ -93,31 +95,30 @@ The validator checks that both files parse correctly, extracts player and frame 
 
 ## 5. Access the Full Dataset
 
-### From HuggingFace Hub (easiest)
-
-The full 10-match dataset is published as Parquet on HuggingFace:
-
-```python
-from datasets import load_dataset
-
-ds = load_dataset("luxury-lakehouse/pining-for-the-data")
-```
+The 20 matches are served as-is through the Mock Provider API's public tier — the same
+JSON / JSONL / CSV files described above, one artifact per HTTP request (the files are
+served as-is; there is no bundled Parquet build).
 
 ### From the Mock API
 
-If you need to test provider-style ingestion (bearer token auth, HTTP download):
+Provider-style ingestion (bearer token auth, HTTP download):
 
 ```bash
 TOKEN="test-token-pining-for-the-data"
 API="https://your-api-url/v1"
 
-# List available games
+# List available games (20 matches)
 curl -s -H "Authorization: Bearer $TOKEN" "$API/skillcorner/matches" | python -m json.tool
 
-# Download a tracking file
+# Download a tracking file (artifact keys are id-prefixed)
 curl -s -L -H "Authorization: Bearer $TOKEN" \
-  "$API/skillcorner/matches/game_03/tracking" -o tracking.jsonl
+  "$API/skillcorner/matches/2016236/2016236_tracking_extrapolated" -o tracking.jsonl
 ```
+
+### From the upstream source
+
+The data originates from SkillCorner's MIT-licensed [open-data repository](https://github.com/SkillCorner/opendata)
+under `data/matches/<id>/` — publicly fetchable without authentication.
 
 See the [Setup Guide](../terraform/docs/setup.md) to deploy your own API instance.
 

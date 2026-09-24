@@ -69,3 +69,12 @@ class TestCheckPublicMatch:
     def test_flags_artifact_that_does_not_serve(self, verify) -> None:
         problems = verify.check_public_match(_public_entry(), lambda key: 404)
         assert any("returned 404" in p for p in problems)
+
+
+class TestCheckTrackingNotPointer:
+    def test_ok_for_real_jsonl(self, verify) -> None:
+        assert verify.check_tracking_not_pointer("1874553", b'{"frame": 0, "timestamp": null}') == []
+
+    def test_flags_lfs_pointer(self, verify) -> None:
+        problems = verify.check_tracking_not_pointer("1874553", b"version https://git-lfs.github.com/spec/v1\n")
+        assert any("unresolved Git-LFS pointer" in p for p in problems)

@@ -6,6 +6,7 @@ scripts/ is not a package; the `load_script` fixture (conftest) loads the adapte
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -76,3 +77,36 @@ class TestPrivatePlayerIds:
         s3 = _mock_s3()
         s3.get_object.side_effect = s3.exceptions.NoSuchKey()
         assert opendata_adapter.private_player_ids(s3, "bucket") == set()
+
+
+def _pointer_for(blob: bytes) -> bytes:
+    oid = hashlib.sha256(blob).hexdigest()
+    return (
+        b"version https://git-lfs.github.com/spec/v1\n"
+        b"oid sha256:" + oid.encode() + b"\n"
+        b"size " + str(len(blob)).encode() + b"\n"
+    )
+
+
+class TestFetchResolved:
+    def test_returns_real_body_unchanged(self, opendata_adapter) -> None:
+        body = b'{"frame": 0}\n'
+        out = opendata_adapter.fetch_resolved("x.jsonl", raw=lambda r: body, media=lambda r: b"UNUSED")
+        assert out == body
+
+    def test_resolves_pointer_via_media_and_verifies(self, opendata_adapter) -> None:
+        blob = b'{"frame": 0, "timestamp": null}\n'
+        pointer = _pointer_for(blob)
+        out = opendata_adapter.fetch_resolved("x.jsonl", raw=lambda r: pointer, media=lambda r: blob)
+        assert out == blob
+
+    def test_raises_on_media_integrity_mismatch(self, opendata_adapter) -> None:
+        blob = b'{"frame": 0}\n'
+        pointer = _pointer_for(blob)
+        corrupt = b"X" * (len(blob) - 1) + b"\n"  # same length -> size passes, sha256 differs
+        with pytest.raises(ValueError, match="sha256 mismatch"):
+            opendata_adapter.fetch_resolved("x.jsonl", raw=lambda r: pointer, media=lambda r: corrupt)
+
+    def test_raises_on_empty(self, opendata_adapter) -> None:
+        with pytest.raises(ValueError, match="empty"):
+            opendata_adapter.fetch_resolved("x.jsonl", raw=lambda r: b"", media=lambda r: b"UNUSED")

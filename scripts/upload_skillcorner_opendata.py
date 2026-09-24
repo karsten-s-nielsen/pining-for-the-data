@@ -37,9 +37,12 @@ sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
 from formats.skillcorner_opendata import (  # noqa: E402
     discover_match_ids,
+    is_lfs_pointer,
     match_info,
     opendata_files,
+    parse_lfs_pointer,
     select_new_matches,
+    verify_blob,
 )
 
 PROVIDER = "skillcorner"
@@ -47,6 +50,7 @@ SOURCE_NAME = "SkillCorner Open Data"
 SOURCE_URL = "https://github.com/SkillCorner/opendata"
 SOURCE_LICENCE = "MIT"
 RAW_BASE = "https://raw.githubusercontent.com/SkillCorner/opendata/master/data"
+MEDIA_BASE = "https://media.githubusercontent.com/media/SkillCorner/opendata/master/data"
 
 
 def http_get(rel: str) -> bytes:
@@ -55,12 +59,44 @@ def http_get(rel: str) -> bytes:
         return resp.read()
 
 
+def media_get(rel: str) -> bytes:
+    """Fetch a ``data/``-root-relative path's real LFS blob from the media host (anonymous)."""
+    with urllib.request.urlopen(f"{MEDIA_BASE}/{rel}", timeout=180) as resp:
+        return resp.read()
+
+
+def fetch_resolved(
+    rel: str,
+    *,
+    raw: Callable[[str], bytes] = http_get,
+    media: Callable[[str], bytes] = media_get,
+) -> bytes:
+    """Fetch an opendata artifact, transparently resolving a Git-LFS pointer.
+
+    ``raw`` (raw.githubusercontent) serves a 133-byte pointer for any LFS-tracked file — all
+    ``*.jsonl`` per the repo ``.gitattributes``. On a pointer, refetch the real blob from ``media``
+    and verify it against the pointer's own ``sha256``/``size`` (byte-parity with upstream). Raises
+    ValueError on an empty artifact or an integrity mismatch. Generalized to any artifact, so a
+    future upstream LFS migration of a non-jsonl file is handled without a code change.
+    """
+    body = raw(rel)
+    if not body:
+        raise ValueError(f"artifact {rel} is empty")
+    if is_lfs_pointer(body):
+        oid, size = parse_lfs_pointer(body)
+        blob = media(rel)
+        verify_blob(blob, oid, size)
+        return blob
+    return body
+
+
 def stage_match(fetch: Callable[[str], bytes], staging_dir: Path, match_id: str) -> Path:
     """Fetch + stage the four opendata artifacts for one match; return the staging dir.
 
     The staged filename keeps the id-prefixed opendata basename so ``upload_game`` derives the
     legacy artifact keys. Raises ValueError if any artifact is empty (a defective delivery) so a
-    bad match is never half-uploaded. ``fetch(rel)`` returns bytes for a data-root-relative path.
+    bad match is never half-uploaded. ``fetch(rel)`` returns bytes for a data-root-relative path;
+    in production it is ``fetch_resolved``, which transparently resolves Git-LFS pointers.
     """
     dest = Path(staging_dir) / match_id
     dest.mkdir(parents=True, exist_ok=True)
@@ -154,7 +190,7 @@ def main() -> None:
     for mid in new_ids:
         info = match_info(metas[mid])
         with tempfile.TemporaryDirectory(prefix=f"sc-od-{mid}-") as tmp:
-            staging = stage_match(http_get, Path(tmp), mid)
+            staging = stage_match(fetch_resolved, Path(tmp), mid)
             upload_game(
                 game_dir=staging,
                 provider=PROVIDER,

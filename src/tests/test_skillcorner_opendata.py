@@ -5,14 +5,20 @@ Every id, team and date below is invented — nothing is copied from the opendat
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from formats.skillcorner_opendata import (
     OpenDataMatchInfo,
     discover_match_ids,
+    is_lfs_pointer,
     match_info,
     opendata_files,
+    parse_lfs_pointer,
+    public_opendata_ids,
     select_new_matches,
+    verify_blob,
 )
 
 
@@ -80,3 +86,59 @@ class TestMatchInfo:
         meta.update(override)
         with pytest.raises(ValueError):
             match_info(meta)
+
+
+_POINTER = b"version https://git-lfs.github.com/spec/v1\noid sha256:" + b"a" * 64 + b"\nsize 90729279\n"
+
+
+class TestIsLfsPointer:
+    def test_true_for_pointer(self) -> None:
+        assert is_lfs_pointer(_POINTER) is True
+
+    def test_false_for_real_jsonl(self) -> None:
+        assert is_lfs_pointer(b'{"frame": 0, "timestamp": null}\n') is False
+
+    def test_false_for_empty(self) -> None:
+        assert is_lfs_pointer(b"") is False
+
+
+class TestParseLfsPointer:
+    def test_extracts_oid_and_size(self) -> None:
+        oid, size = parse_lfs_pointer(_POINTER)
+        assert oid == "a" * 64
+        assert size == 90729279
+
+    def test_raises_on_missing_oid(self) -> None:
+        with pytest.raises(ValueError, match="malformed LFS pointer"):
+            parse_lfs_pointer(b"version https://git-lfs.github.com/spec/v1\nsize 5\n")
+
+    def test_raises_on_missing_size(self) -> None:
+        with pytest.raises(ValueError, match="malformed LFS pointer"):
+            parse_lfs_pointer(b"version https://git-lfs.github.com/spec/v1\noid sha256:" + b"a" * 64 + b"\n")
+
+
+class TestVerifyBlob:
+    def test_ok_when_sha_and_size_match(self) -> None:
+        body = b'{"frame": 0}\n'
+        verify_blob(body, hashlib.sha256(body).hexdigest(), len(body))  # no raise
+
+    def test_raises_on_size_mismatch(self) -> None:
+        body = b'{"frame": 0}\n'
+        with pytest.raises(ValueError, match="size mismatch"):
+            verify_blob(body, hashlib.sha256(body).hexdigest(), len(body) + 1)
+
+    def test_raises_on_sha_mismatch(self) -> None:
+        body = b'{"frame": 0}\n'
+        with pytest.raises(ValueError, match="sha256 mismatch"):
+            verify_blob(body, "b" * 64, len(body))
+
+
+class TestPublicOpendataIds:
+    def test_selects_public_with_tracking_sorted(self) -> None:
+        matches = [
+            {"id": "1959846", "visibility": "public", "artifacts": {"1959846_tracking_extrapolated": "x.jsonl"}},
+            {"id": "1874553", "visibility": "public", "artifacts": {"1874553_tracking_extrapolated": "y.jsonl"}},
+            {"id": "5001", "visibility": "private", "artifacts": {"5001_tracking_extrapolated": "z.jsonl"}},
+            {"id": "9999", "visibility": "public", "artifacts": {"9999_match": "m.json"}},
+        ]
+        assert public_opendata_ids(matches) == ["1874553", "1959846"]

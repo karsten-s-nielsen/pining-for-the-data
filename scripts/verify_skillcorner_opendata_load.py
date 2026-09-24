@@ -7,6 +7,8 @@ Asserts (PUBLIC tier — open MIT data, served to the public token):
   - a sampled new match: the entry is public / provenance=redistributed / no format_version, lists
     exactly its four id-prefixed artifacts, and each is served (302) — checked without downloading
     the GB-scale bodies.
+  - each new match's tracking body is real JSONL, not an unresolved Git-LFS pointer (first-bytes
+    range read — decisive without the ~90 MB download).
 
 The pure checks (verify_listing / check_public_match / opendata_artifact_keys) are unit-tested with
 injected callables; main wires them to the live API. The 10 new ids are public MIT opendata ids
@@ -87,6 +89,17 @@ def check_public_match(entry: dict, artifact_status: Callable[[str], int]) -> li
     return problems
 
 
+def check_tracking_not_pointer(match_id: str, first_bytes: bytes) -> list[str]:
+    """Problem if the tracking body is still an unresolved Git-LFS pointer (empty == ok).
+
+    A pointer serves a normal 302/200, so the status check passes; only inspecting the body
+    catches it. Checking the first bytes is decisive and avoids the ~90 MB download.
+    """
+    if first_bytes.startswith(b"version https://git-lfs"):
+        return [f"{match_id}: tracking artifact is an unresolved Git-LFS pointer"]
+    return []
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Verify the public SkillCorner A-League (opendata) load")
     ap.add_argument("--api", default=os.environ.get("PINING_API"), help="API base URL (or $PINING_API)")
@@ -116,6 +129,31 @@ def main() -> None:
 
         return _status
 
+    def tracking_first_bytes(match_id: str, n: int = 64) -> bytes:
+        # Handle BOTH serve modes: a 302 to a presigned S3 URL (fetch it header-free with a Range),
+        # and a direct 200 that streams the body (read the first n bytes off the response). The
+        # existing artifact_status check accepts 200 OR 302, so a pointer could arrive either way.
+        key = f"{match_id}_tracking_extrapolated"
+        req = urllib.request.Request(
+            f"{args.api}/{PROVIDER}/matches/{match_id}/{key}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        location = None
+        try:
+            with opener.open(req, timeout=30) as resp:
+                location = resp.headers.get("Location")
+                if not location:  # 200 — body is streamed directly; read the first n bytes
+                    return resp.read(n)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (301, 302, 303, 307, 308):
+                return b""  # non-pointer sentinel; artifact_status already asserts servability
+            location = exc.headers.get("Location")
+        if not location:
+            return b""
+        ranged = urllib.request.Request(location, headers={"Range": f"bytes=0-{n - 1}"})
+        with urllib.request.urlopen(ranged, timeout=30) as blob_resp:
+            return blob_resp.read()
+
     problems: list[str] = []
 
     matches = get_json(args.api, f"/{PROVIDER}/matches", token).get("matches", [])
@@ -135,6 +173,12 @@ def main() -> None:
         problems.append("no new match present to sample artifacts from")
     else:
         problems += check_public_match(present[sample_id], artifact_status_for(sample_id))
+
+    # The tracking JSONL was the corrupted artifact — check every new id's body (cheap 64-byte
+    # range reads) is real JSONL, not an unresolved Git-LFS pointer that still serves 200/302.
+    for mid in NEW_MATCH_IDS:
+        if mid in present:
+            problems += check_tracking_not_pointer(mid, tracking_first_bytes(mid))
 
     if problems:
         print(f"FAIL — {len(problems)} problem(s):")

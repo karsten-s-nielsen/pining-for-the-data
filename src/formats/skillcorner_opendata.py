@@ -16,6 +16,8 @@ importantly, a mismatch with the UTC calendar date the original 10 public entrie
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -85,3 +87,64 @@ def match_info(meta: dict) -> OpenDataMatchInfo:
     if "T" not in date_time or len(date_time) < 10:
         raise ValueError(f"unexpected date_time format: {date_time!r}")
     return OpenDataMatchInfo(match_id=str(match_id), date=date_time[:10], home=home, away=away)
+
+
+# --- Git-LFS resolution helpers -------------------------------------------------------------------
+# The opendata repo LFS-tracks every ``*.jsonl`` (``.gitattributes: *.jsonl filter=lfs``), so
+# raw.githubusercontent serves a 133-byte pointer, not the blob. These pure helpers let the loader
+# and the backfill detect a pointer, read its content-addressed identity, and prove a resolved blob
+# is byte-identical to upstream (the redistribution contract).
+
+_LFS_MAGIC = b"version https://git-lfs.github.com/spec/v1"
+_LFS_OID_RE = re.compile(r"^oid sha256:([0-9a-f]{64})$", re.MULTILINE)
+_LFS_SIZE_RE = re.compile(r"^size (\d+)$", re.MULTILINE)
+
+
+def is_lfs_pointer(body: bytes) -> bool:
+    """True if ``body`` is a Git-LFS pointer file rather than the real blob.
+
+    raw.githubusercontent.com serves this 133-byte text for any LFS-tracked path; the opendata
+    repo LFS-tracks every ``*.jsonl`` (``.gitattributes: *.jsonl filter=lfs``).
+    """
+    return body.startswith(_LFS_MAGIC)
+
+
+def parse_lfs_pointer(body: bytes) -> tuple[str, int]:
+    """Extract ``(oid_sha256_hex, size)`` from a Git-LFS pointer body.
+
+    Raises ValueError if either the ``oid sha256:<hex>`` or ``size <int>`` line is absent/malformed.
+    """
+    text = body.decode("utf-8", errors="replace")
+    oid_m = _LFS_OID_RE.search(text)
+    size_m = _LFS_SIZE_RE.search(text)
+    if not oid_m or not size_m:
+        raise ValueError("malformed LFS pointer (need 'oid sha256:<64-hex>' and 'size <int>')")
+    return oid_m.group(1), int(size_m.group(1))
+
+
+def verify_blob(body: bytes, oid: str, size: int) -> None:
+    """Assert a resolved blob matches the pointer's content-addressed identity.
+
+    The pointer's ``oid`` IS the sha256 of the real content, so this proves byte-parity with
+    upstream — the redistribution contract. Raises ValueError on size or sha256 mismatch
+    (truncation, corruption, LFS-bandwidth error page, or wrong object).
+    """
+    if len(body) != size:
+        raise ValueError(f"LFS blob size mismatch: got {len(body)}, expected {size}")
+    digest = hashlib.sha256(body).hexdigest()
+    if digest != oid:
+        raise ValueError(f"LFS blob sha256 mismatch: got {digest}, expected {oid}")
+
+
+def public_opendata_ids(matches: list[dict]) -> list[str]:
+    """Sorted ids of public entries carrying a ``*_tracking_extrapolated`` artifact.
+
+    Used by the backfill to select the live A-League matches whose tracking object may be an
+    unresolved LFS pointer. ``_sorted_ids`` keeps numeric SkillCorner ids in numeric order.
+    """
+    ids = [
+        str(m["id"])
+        for m in matches
+        if m.get("visibility") == "public" and any("tracking_extrapolated" in k for k in (m.get("artifacts") or {}))
+    ]
+    return _sorted_ids(ids)

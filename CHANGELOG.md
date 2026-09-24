@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-23
+
+### Fixed
+- **Public SkillCorner opendata tracking served as Git-LFS pointers** — the opendata repo LFS-tracks every `*.jsonl` (`.gitattributes: *.jsonl filter=lfs`), and `raw.githubusercontent.com` serves the 133-byte pointer, not the blob. `upload_skillcorner_opendata.py` had uploaded those pointers as the `_tracking_extrapolated` artifact, so the affected A-League matches served a pointer instead of per-frame JSONL. The loader now resolves a pointer via `media.githubusercontent.com` and verifies the blob against the pointer's own `sha256`/`size` (byte-parity with upstream — the redistribution contract), generalized to any artifact. Pure helpers `is_lfs_pointer` / `parse_lfs_pointer` / `verify_blob` / `public_opendata_ids` added to `formats.skillcorner_opendata`; `fetch_resolved` added to the loader.
+- **Verify now inspects the tracking body** — `verify_skillcorner_opendata_load.py` previously checked artifact fetch status only (302/200), which a pointer passes. It now range-reads each new match's tracking first bytes and fails on the Git-LFS magic (decisive, no GB-scale download), handling both the 302-redirect and direct-200 serve modes.
+- `scripts/backfill_skillcorner_opendata_lfs.py` — one-shot, dry-run-first, idempotent repair: reads live `skillcorner/matches.json`, range-probes every public opendata tracking object (no byte-count gate — the decision is `is_lfs_pointer` on the body via pure `select_repairs`), and re-uploads the resolved blob through the same `upload_file` path as a fresh ingest (metadata parity), asserting the new object size post-write. Retained as the audit trail for the live-S3 change.
+- Test count: 432 → 451 (+19 unit tests — the LFS pointer parse/verify/detect helpers, public-id selection, the loader's `fetch_resolved` resolve-and-verify paths, the verify body check, and the backfill's pure `select_repairs` incl. a 9-digit-size pointer case; wholly-invented fixtures only).
+
 ## [0.8.0] - 2026-09-09
 
 ### Added

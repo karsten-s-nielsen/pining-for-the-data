@@ -1,0 +1,23 @@
+{
+  "count": 18,
+  "entries": [
+    {"id": "deidentify-two-layer", "class1_anchor": "Two-layer mapping: stable synthetic identity (Layer 1) → per-game jersey mapping (Layer 2)", "symbols": ["src/deidentify/"], "home": "agents"},
+    {"id": "deid-reserved-names", "class1_anchor": "4 featured names: Fezzik Took, Tormund Tully, Westley Montoya, T'Challa Stark", "symbols": ["Wakanda FC", "Asgard Athletic"], "home": "agents"},
+    {"id": "formats-owner-canonical-parquet", "class1_anchor": "canonical columnar Parquet/zstd", "symbols": ["skillcorner_canonical.py", "tracking.parquet", "format_version", "skillcorner_raw.py"], "home": "context:formats-and-tiers"},
+    {"id": "formats-public-native-v3", "class1_anchor": "public A-League tier stays in its native V3 shape", "symbols": ["skillcorner_opendata.py", "SkillCorner Open Data"], "home": "context:formats-and-tiers"},
+    {"id": "statsbomb-two-families-provenance", "class1_anchor": "both StatsBomb source families are owner-tier only", "symbols": ["statsbomb_open.py", "provenance", "redistributed", "original"], "home": "context:formats-and-tiers"},
+    {"id": "statsbomb-faithful-feed", "class1_anchor": "faithful-feed gzip-JSON", "symbols": ["de-pivot"], "home": "context:formats-and-tiers"},
+    {"id": "schemas-pydantic-free-runtime", "class1_anchor": "models kept out of the Lambda zip so the runtime stays pydantic-free", "symbols": ["src/canonical/models.py", "MatchEntry", "PlayerRecord"], "home": "agents"},
+    {"id": "scripts-load-verify-pairs", "class1_anchor": "per-provider load + post-load verify pairs", "symbols": ["upload_gradient_wc2022.py", "verify_gradient_load.py", "upload_idsse_bundesliga.py", "verify_idsse_load.py", "upload_statsbomb_club.py", "upload_statsbomb_open.py", "verify_statsbomb_load.py"], "home": "context:scripts-and-migrations"},
+    {"id": "scripts-canonical-ingest-adapters", "class1_anchor": "two source-family adapters sharing one verify", "symbols": ["upload_skillcorner_raw.py", "upload_skillcorner_parquet.py", "partition_ingestible", "verify_skillcorner_canonical_load.py", "upload_skillcorner_realmadrid.py", "verify_skillcorner_realmadrid_load.py"], "home": "context:scripts-and-migrations"},
+    {"id": "scripts-opendata-public", "class1_anchor": "Public-tier SkillCorner Open Data", "symbols": ["upload_skillcorner_opendata.py", "verify_skillcorner_opendata_load.py", "players_from_meta", "derive_players"], "home": "context:scripts-and-migrations"},
+    {"id": "scripts-completed-migrations-audit", "class1_anchor": "Completed one-shot migrations", "symbols": ["backfill_skillcorner_artifacts.py", "migrate_skillcorner_tracking_parquet.py", "migrate_pff_to_gradientsports.py", "migrate_gradientsports_slug.py", "backfill_skillcorner_opendata_lfs.py", "idsse_figshare_manifest.json", "_verify_http.py", "regenerate_schemas.py"], "home": "context:scripts-and-migrations"},
+    {"id": "conventions-toolchain", "class1_anchor": "Ruff for linting/formatting (line-length 120)", "symbols": ["Python 3.12+", "Pyright", "hatch"], "home": "agents"},
+    {"id": "conventions-no-tracking-data", "class1_anchor": "No tracking data files in the repo", "symbols": ["too large for git"], "home": "agents"},
+    {"id": "conventions-licensing", "class1_anchor": "MIT license (code + redistributed SkillCorner data)", "symbols": ["CC-BY-4.0"], "home": "agents"},
+    {"id": "cli-entry-points", "class1_anchor": "upload game artifacts to S3 and update provider indexes", "symbols": ["pining-generate-roster", "pining-ingest", "pining-publish", "pining-upload", "pining-upload-players", "--visibility"], "home": "agents"},
+    {"id": "api-two-tier-ssm", "class1_anchor": "bearer token stored in SSM Parameter Store SecureString", "symbols": ["/pining-for-the-data/api_token_owner", "api_token", "terraform.tfvars"], "home": "agents"},
+    {"id": "api-tier-enum-404-failclosed", "class1_anchor": "Tier mismatch returns uniform `404`", "symbols": ["validate_token", "Tier", "PUBLIC", "OWNER", "shared.py"], "home": "agents"},
+    {"id": "api-rotation", "class1_anchor": "bump `LAST_ROTATION` env var on all 6 Lambdas", "symbols": ["last_rotation", "401 retry"], "home": "agents"}
+  ]
+}

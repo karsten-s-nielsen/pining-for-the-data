@@ -1,11 +1,11 @@
-workspace "pining-for-the-data" "Open + restricted soccer tracking data redistribution and mock provider API with two-tier auth" {
+workspace "pining-for-the-data" "Open + restricted soccer tracking data redistribution and mock provider API with three-tier auth" {
 
     model {
         analyst = person "Soccer Analyst" "Researcher or data scientist analysing tracking data"
         developer = person "Platform Developer" "Developer building ingestion adapters against the mock API"
         operator = person "Operator" "Repo owner; uploads data, manages tokens, runs orchestrator scripts"
 
-        pining = softwareSystem "pining-for-the-data" "Redistributes open tracking data (MIT SkillCorner, CC-BY IDSSE/DFL) via HuggingFace Hub and serves both open and operator-loaded restricted content via a two-tier mock provider API" {
+        pining = softwareSystem "pining-for-the-data" "Redistributes open tracking data (MIT SkillCorner, CC-BY IDSSE/DFL) via HuggingFace Hub and serves both open and operator-loaded restricted content via a three-tier mock provider API" {
             ingestCli = container "Ingest CLI" "Validates SkillCorner V3 match JSON + tracking JSONL" "Python 3.12+, pining-ingest"
             rosterCli = container "Roster Generator CLI" "Generates synthetic rosters with fictional identities for de-identification" "Python 3.12+, pining-generate-roster"
             deidentify = container "De-identification Engine" "Two-layer jersey-to-identity mapping using fictional name pools" "Python 3.12+"
@@ -29,14 +29,16 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             statsbombOpenOrchestrator = container "StatsBomb Open-Data Orchestrator" "One-shot script: fetch+cache the real open-data feed over raw HTTPS, delivery-coherence pre-flight, build_metadata_open reshape (no de-pivot/join — the real feed), same-tier skip-and-report players, two-dir stage of the four role artifacts, drive uploadCli + uploadPlayersCli (owner tier, provenance=redistributed, ADR 0012)" "Python 3.12+, scripts/upload_statsbomb_open.py"
             matchIndexBackfill = container "Match Index Backfill" "One-shot, two-pass: sets competition/season fields + artifact_meta on every live entry; pass 1 reads, checks, hashes (any error stops it); pass 2 IfMatch write (ADR 0013)" "Python 3.12+, scripts/backfill_match_competition_and_artifact_meta.py"
             matchIndexVerify = container "Match Index Verify Script" "Cross-provider HTTP check (owner token): fields equal the metadata artifact, artifact_meta keys, sizes by Range GET, optional --full-hash; 8 rps with 429/5xx retry" "Python 3.12+, scripts/verify_match_index_fields.py"
+            listTierVerify = container "LIST Tier Verify Script" "Live check of every tier: placeholder 401, LIST /matches equals OWNER (with each filter), LIST 404 on sampled artifacts with 302 controls, LIST equals PUBLIC on players and providers, PUBLIC/OWNER snapshot before vs after the merge; never follows a redirect (ADR 0014)" "Python 3.12+, scripts/verify_list_token_tier.py"
             statsbombVerify = container "StatsBomb Verify Script" "Post-load HTTP verification: owner-vs-public tier split, exact artifact key set (events, freeze_frames, roster, metadata), metadata envelope shape, Range GET for large bodies; also samples one provenance=redistributed open-data match (owner sees it; public gets 404)" "Python 3.12+, scripts/verify_statsbomb_load.py"
 
             apiGateway = container "API Gateway" "REST API with bearer token auth, throttled (10 rps / 50 burst)" "AWS API Gateway HTTP API"
             lambdaProviders = container "list_providers Lambda" "Returns provider catalogue (tier-blind)" "AWS Lambda, Python 3.12"
             lambdaMatches = container "list_matches Lambda" "Returns match index for a provider; tier-filtered with optional query params (updatedSince, dateFrom, dateTo)" "AWS Lambda, Python 3.12"
             lambdaArtifact = container "get_artifact Lambda" "Looks up filename via artifacts dict; returns 302 + presigned URL" "AWS Lambda, Python 3.12" {
-                validateToken = component "validate_token" "Returns Tier.PUBLIC / Tier.OWNER / 401; PUBLIC on duplicate (fail closed)" "Python function, hmac.compare_digest"
-                ownerTokenFetcher = component "_get_owner_token" "Fetches owner token from SSM; functools.cache for warm-container lifetime" "Python, boto3 SSM"
+                validateToken = component "validate_token" "Returns Tier.PUBLIC / Tier.LIST / Tier.OWNER / 401; compares UTF-8 bytes; PUBLIC on any token collision (fail closed)" "Python function, hmac.compare_digest"
+                ownerTokenFetcher = component "_get_owner_token" "Fetches owner token from SSM; unset guard disables the tier; functools.cache for warm-container lifetime" "Python, boto3 SSM"
+                listTokenFetcher = component "_get_list_token" "Fetches the LIST token from SSM; unset guard; a fetch failure disables only the LIST tier" "Python, boto3 SSM"
                 pathValidator = component "validate_path_param" "Rejects empty / oversized / `_`-prefixed path parameters" "Python, regex"
                 artifactResolver = component "Artifact resolver" "Dict lookup in artifacts object; rejects names not in the allowlist" "Python, dict"
                 presignBuilder = component "Presigned URL builder" "S3 generate_presigned_url with SigV4 signing" "boto3, KMS-aware"
@@ -49,7 +51,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             auditBucket = container "Audit Bucket (S3)" "CloudTrail data events; 365-day lifecycle; SSE-KMS; versioned" "AWS S3" "Database"
             cloudtrail = container "CloudTrail" "Data events on data bucket; excludes only providers.json reads" "AWS CloudTrail"
             kmsKey = container "KMS CMK" "Encrypts data bucket, audit bucket, and SSM SecureString" "AWS KMS"
-            ssmParam = container "SSM Parameter Store" "Owner-tier bearer token (SecureString, KMS-encrypted)" "AWS SSM"
+            ssmParam = container "SSM Parameter Store" "Owner-tier and LIST-tier bearer tokens (SecureStrings, KMS-encrypted)" "AWS SSM"
             canonicalModels = container "Canonical Models (Pydantic)" "MatchEntry + PlayerRecord; src/canonical/models.py — outside Lambda src so the runtime stays pydantic-free (ADR 0006)" "Python 3.12+, Pydantic v2"
             schemas = container "Published JSON Schemas" "matches.schema.json + players.schema.json with URN $id, drift-tested in CI" "schemas/, generated from canonical models"
 
@@ -59,7 +61,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
 
         skillcorner = softwareSystem "SkillCorner Open Data" "MIT-licensed A-League tracking data" "External"
         huggingface = softwareSystem "HuggingFace Hub" "Dataset hosting platform (Level 1 distribution)" "External"
-        luxuryLakehouse = softwareSystem "luxury-lakehouse" "Serverless soccer analytics platform; consumes the mock API with the owner token" "External"
+        luxuryLakehouse = softwareSystem "luxury-lakehouse" "Serverless soccer analytics platform; ingests with the owner token; its v2 Ops Space lists matches with the LIST token" "External"
         gradientSports = softwareSystem "Gradient Sports" "Source of restricted FIFA WC 2022 dataset; operator has download access" "External"
         idsse = softwareSystem "IDSSE / DFL Open Data" "CC-BY 4.0 Bundesliga tracking + event data (Bassek et al. 2025); version-pinned figshare release, provided with DFL/Sportec authorization" "External"
         skillcornerRestricted = softwareSystem "SkillCorner Restricted Bundle" "Restricted SkillCorner multi-artifact tracking bundle (owner tier); operator has a licensed copy" "External"
@@ -69,6 +71,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         developer -> apiGateway "Tests ingestion adapters against the mock API" "HTTPS + public bearer token"
         analyst -> apiGateway "Downloads tracking artifacts" "HTTPS + public bearer token"
         luxuryLakehouse -> apiGateway "Ingests open + restricted tracking data" "HTTPS + owner bearer token"
+        luxuryLakehouse -> apiGateway "Lists matches for the Ops Space preview (no artifacts)" "HTTPS + LIST bearer token"
         operator -> uploadCli "Uploads game artifacts" "Shell"
         operator -> uploadPlayersCli "Uploads player catalogue (canonical JSON)" "Shell"
         operator -> gradientOrchestrator "Bulk-loads Gradient Sports WC 2022" "Shell"
@@ -88,7 +91,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         operator -> statsbombVerify "Runs StatsBomb post-load verification" "Shell"
         operator -> matchIndexBackfill "Backfills competition/season fields + artifact_meta (dry-run, then --apply)" "Shell"
         operator -> matchIndexVerify "Runs the cross-provider match-index verification" "Shell"
-        operator -> ssmParam "Sets owner token (out-of-band)" "aws ssm put-parameter"
+        operator -> listTierVerify "Runs the LIST-tier live verification (snapshot, before-token, full)" "Shell"
+        operator -> ssmParam "Sets owner and LIST tokens (out-of-band)" "aws ssm put-parameter"
 
         skillcorner -> formats "Source tracking data (git clone)" "Git LFS"
         skillcorner -> skillcornerOpendataOrchestrator "Fetches the public open-data feed over anonymous raw HTTPS, resolving Git-LFS tracking blobs via the media host (sha256/size-verified)" "HTTPS"
@@ -142,6 +146,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         matchIndexBackfill -> dataBucket "Stream-hashes stored objects; one IfMatch write of each matches.json" "boto3 S3 API"
         matchIndexVerify -> formats "Parses each fetched metadata artifact" "Python import"
         matchIndexVerify -> apiGateway "Lists matches and fetches artifacts with the owner token" "HTTPS"
+        listTierVerify -> apiGateway "Compares responses with the public, LIST and owner tokens" "HTTPS"
+        listTierVerify -> ssmParam "Reads the LIST token (--list-token-from-ssm); never prints it" "boto3 SSM GetParameter"
 
         apiGateway -> lambdaProviders "GET /v1/providers" "Lambda proxy"
         apiGateway -> lambdaMatches "GET /v1/{provider}/matches" "Lambda proxy"
@@ -156,11 +162,11 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         lambdaPlayers -> dataBucket "Reads providers.json + players.json indexes (public + _private for OWNER)" "S3 GetObject"
         lambdaPlayer -> dataBucket "Same as list_players; finds by id with private-wins precedence" "S3 GetObject"
 
-        lambdaProviders -> ssmParam "Fetches owner token (cached per warm container)" "boto3 SSM GetParameter"
-        lambdaMatches -> ssmParam "Fetches owner token (cached per warm container)" "boto3 SSM GetParameter"
-        lambdaArtifact -> ssmParam "Fetches owner token (cached per warm container)" "boto3 SSM GetParameter"
-        lambdaPlayers -> ssmParam "Fetches owner token (cached per warm container)" "boto3 SSM GetParameter"
-        lambdaPlayer -> ssmParam "Fetches owner token (cached per warm container)" "boto3 SSM GetParameter"
+        lambdaProviders -> ssmParam "Fetches owner and LIST tokens (cached per warm container)" "boto3 SSM GetParameter"
+        lambdaMatches -> ssmParam "Fetches owner and LIST tokens (cached per warm container)" "boto3 SSM GetParameter"
+        lambdaArtifact -> ssmParam "Fetches owner and LIST tokens (cached per warm container)" "boto3 SSM GetParameter"
+        lambdaPlayers -> ssmParam "Fetches owner and LIST tokens (cached per warm container)" "boto3 SSM GetParameter"
+        lambdaPlayer -> ssmParam "Fetches owner and LIST tokens (cached per warm container)" "boto3 SSM GetParameter"
 
         ssmParam -> kmsKey "Decrypts SecureString" "KMS Decrypt"
         dataBucket -> kmsKey "Encrypts/decrypts objects" "SSE-KMS"
@@ -198,7 +204,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
                 deploymentNode "KMS" "Customer-managed key with annual rotation" "AWS KMS" {
                     containerInstance kmsKey
                 }
-                deploymentNode "SSM" "Parameter Store SecureString for owner token" "AWS SSM Parameter Store" {
+                deploymentNode "SSM" "Parameter Store SecureStrings for the owner and LIST tokens" "AWS SSM Parameter Store" {
                     containerInstance ssmParam
                 }
                 deploymentNode "Observability" "CloudWatch alarms, SNS notifications, dashboard (ADR 0007)" "AWS CloudWatch + SNS" {
@@ -232,6 +238,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
                 containerInstance statsbombVerify
                 containerInstance matchIndexBackfill
                 containerInstance matchIndexVerify
+                containerInstance listTierVerify
                 containerInstance canonicalModels
                 containerInstance schemas
             }
@@ -308,6 +315,12 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         container pining "Containers_MatchIndex" {
             include operator matchIndexBackfill matchIndexVerify
             include formats canonicalModels dataBucket apiGateway
+            autoLayout
+        }
+
+        # LIST token tier: the live verify of every tier's responses (ADR 0014).
+        container pining "Containers_ListTier" {
+            include operator listTierVerify luxuryLakehouse apiGateway ssmParam
             autoLayout
         }
 

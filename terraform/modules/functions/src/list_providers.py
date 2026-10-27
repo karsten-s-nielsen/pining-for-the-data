@@ -13,7 +13,7 @@ BUCKET = os.environ.get("DATA_BUCKET", "")
 def handler(event: dict, context: object) -> dict:
     """Return the provider index by reading ``providers.json`` from S3.
 
-    Tier-blind: returns the same list to both PUBLIC and OWNER tiers.
+    Tier-blind: returns the same list to the PUBLIC, LIST and OWNER tiers.
     Existence of a provider is not the secret; the per-match visibility
     flag is the only enforcement boundary. Spec §4.2.
     """

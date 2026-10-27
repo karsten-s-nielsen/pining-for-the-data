@@ -17,6 +17,10 @@ sys.path.insert(0, str(LAMBDA_SRC))
 os.environ.setdefault("API_TOKEN", "pub-tok")
 os.environ.setdefault("DATA_BUCKET", "test-bucket")
 os.environ.setdefault("OWNER_TOKEN_PARAM", "/test/api_token_owner")
+os.environ.setdefault("LIST_TOKEN_PARAM", "/test/api_token_list")
+
+OWN_TOK = "owner-token-invented-0123456789abcdefXYZ"  # pragma: allowlist secret
+LIST_TOK = "list-token-invented-0123456789abcdefXYZ"  # pragma: allowlist secret
 
 import shared  # noqa: E402
 
@@ -33,7 +37,9 @@ def _reset_module_state(monkeypatch):
     """Reset shared module state and stub the owner-token fetcher between tests."""
     shared._s3_client = None
     shared._get_owner_token.cache_clear()
-    monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
+    shared._get_list_token.cache_clear()
+    monkeypatch.setattr(shared, "_get_owner_token", lambda: OWN_TOK)
+    monkeypatch.setattr(shared, "_get_list_token", lambda: LIST_TOK)
     monkeypatch.setenv("API_TOKEN", "pub-tok")
     yield
     shared._s3_client = None
@@ -68,13 +74,13 @@ class TestValidateToken:
     def test_owner_token(self) -> None:
         from shared import Tier, validate_token
 
-        event = {"headers": {"authorization": "Bearer own-tok"}}
+        event = {"headers": {"authorization": f"Bearer {OWN_TOK}"}}
         assert validate_token(event) == Tier.OWNER
 
     def test_owner_token_capitalized_header(self) -> None:
         from shared import Tier, validate_token
 
-        event = {"headers": {"Authorization": "Bearer own-tok"}}
+        event = {"headers": {"Authorization": f"Bearer {OWN_TOK}"}}
         assert validate_token(event) == Tier.OWNER
 
     def test_missing_header(self) -> None:
@@ -105,7 +111,7 @@ class TestValidateToken:
         assert isinstance(result, dict)
         assert result["statusCode"] == 401
 
-    def test_same_public_and_owner_classifies_as_public(self, monkeypatch) -> None:
+    def test_same_public_and_owner_classifies_as_public(self, monkeypatch, caplog) -> None:
         """Fail closed: if both tokens are the same string, classify as PUBLIC. Spec §3.2."""
         from shared import Tier, validate_token
 
@@ -113,6 +119,7 @@ class TestValidateToken:
         monkeypatch.setattr(shared, "_get_owner_token", lambda: "duplicate-token")
         result = validate_token({"headers": {"authorization": "Bearer duplicate-token"}})
         assert result == Tier.PUBLIC
+        assert [r for r in caplog.records if r.getMessage() == "token_collision"]
 
 
 # ----- Path-param validator -----
@@ -363,7 +370,7 @@ class TestListProviders:
         body = json.dumps({"providers": ["skillcorner", "gradientsports"]}).encode()
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
-        result = handler({"headers": {"authorization": "Bearer own-tok"}}, None)
+        result = handler({"headers": {"authorization": f"Bearer {OWN_TOK}"}}, None)
         assert result["statusCode"] == 200
         assert json.loads(result["body"])["providers"] == ["skillcorner", "gradientsports"]
 
@@ -414,7 +421,7 @@ class TestListMatches:
         mock_s3.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=body))}
 
         event = {
-            "headers": {"authorization": "Bearer own-tok"},
+            "headers": {"authorization": f"Bearer {OWN_TOK}"},
             "pathParameters": {"provider": "sc"},
         }
         result = handler(event, None)
@@ -506,7 +513,7 @@ class TestListMatchesFiltering:
         }
 
         event = {
-            "headers": {"authorization": "Bearer own-tok"},
+            "headers": {"authorization": f"Bearer {OWN_TOK}"},
             "pathParameters": {"provider": "sc"},
             "queryStringParameters": {"updatedSince": "2026-05-01T00:00:00Z"},
         }
@@ -524,7 +531,7 @@ class TestListMatchesFiltering:
         }
 
         event = {
-            "headers": {"authorization": "Bearer own-tok"},
+            "headers": {"authorization": f"Bearer {OWN_TOK}"},
             "pathParameters": {"provider": "sc"},
             "queryStringParameters": {"dateFrom": "2024-12-07"},
         }
@@ -542,7 +549,7 @@ class TestListMatchesFiltering:
         }
 
         event = {
-            "headers": {"authorization": "Bearer own-tok"},
+            "headers": {"authorization": f"Bearer {OWN_TOK}"},
             "pathParameters": {"provider": "sc"},
             "queryStringParameters": {"dateTo": "2024-12-07"},
         }
@@ -560,7 +567,7 @@ class TestListMatchesFiltering:
         }
 
         event = {
-            "headers": {"authorization": "Bearer own-tok"},
+            "headers": {"authorization": f"Bearer {OWN_TOK}"},
             "pathParameters": {"provider": "sc"},
         }
         result = handler(event, None)
@@ -665,7 +672,7 @@ class TestGetArtifact:
         )
 
         event = {
-            "headers": {"authorization": "Bearer own-tok"},
+            "headers": {"authorization": f"Bearer {OWN_TOK}"},
             "pathParameters": {"provider": "gradientsports", "id": "m-001", "artifact": "metadata"},
         }
         result = handler(event, None)
@@ -708,7 +715,7 @@ class TestGetArtifact:
         self._wire_matches(mock_s3, {"provider": "sc", "matches": []})
 
         event = {
-            "headers": {"authorization": "Bearer own-tok"},
+            "headers": {"authorization": f"Bearer {OWN_TOK}"},
             "pathParameters": {"provider": "sc", "id": "missing", "artifact": "match"},
         }
         result = handler(event, None)
@@ -852,7 +859,7 @@ class TestListPlayers(_PlayersWiring):
             private_payload={"provider": "sc", "players": [{"id": "p2", "nickname": "Priv"}]},
         )
 
-        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc"}}
+        event = {"headers": {"authorization": f"Bearer {OWN_TOK}"}, "pathParameters": {"provider": "sc"}}
         result = handler(event, None)
         assert result["statusCode"] == 200
         ids = sorted(p["id"] for p in json.loads(result["body"])["players"])
@@ -864,7 +871,7 @@ class TestListPlayers(_PlayersWiring):
         mock_s3 = _mock_s3()
         self._wire(mock_s3)
 
-        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc"}}
+        event = {"headers": {"authorization": f"Bearer {OWN_TOK}"}, "pathParameters": {"provider": "sc"}}
         result = handler(event, None)
         assert result["statusCode"] == 200
         assert json.loads(result["body"])["players"] == []
@@ -889,7 +896,7 @@ class TestListPlayers(_PlayersWiring):
             private_payload={"provider": "sc", "players": [{"id": "p1", "nickname": "Private Real"}]},
         )
 
-        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc"}}
+        event = {"headers": {"authorization": f"Bearer {OWN_TOK}"}, "pathParameters": {"provider": "sc"}}
         result = handler(event, None)
         assert result["statusCode"] == 200
         body = json.loads(result["body"])
@@ -1027,7 +1034,7 @@ class TestGetPlayer(_PlayersWiring):
             private_payload={"provider": "sc", "players": [{"id": "p2", "nickname": "Priv"}]},
         )
 
-        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc", "id": "p2"}}
+        event = {"headers": {"authorization": f"Bearer {OWN_TOK}"}, "pathParameters": {"provider": "sc", "id": "p2"}}
         result = handler(event, None)
         assert result["statusCode"] == 200
         assert json.loads(result["body"])["nickname"] == "Priv"
@@ -1038,7 +1045,10 @@ class TestGetPlayer(_PlayersWiring):
         mock_s3 = _mock_s3()
         self._wire(mock_s3, public_payload={"provider": "sc", "players": []})
 
-        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc", "id": "missing"}}
+        event = {
+            "headers": {"authorization": f"Bearer {OWN_TOK}"},
+            "pathParameters": {"provider": "sc", "id": "missing"},
+        }
         result = handler(event, None)
         assert result["statusCode"] == 404
 
@@ -1048,7 +1058,10 @@ class TestGetPlayer(_PlayersWiring):
         mock_s3 = _mock_s3()
         self._wire(mock_s3, providers=("sc", "gradientsports"))
 
-        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "made-up", "id": "p1"}}
+        event = {
+            "headers": {"authorization": f"Bearer {OWN_TOK}"},
+            "pathParameters": {"provider": "made-up", "id": "p1"},
+        }
         result = handler(event, None)
         assert result["statusCode"] == 404
 
@@ -1062,7 +1075,7 @@ class TestGetPlayer(_PlayersWiring):
             private_payload={"provider": "sc", "players": [{"id": "p1", "nickname": "Private Real"}]},
         )
 
-        event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": "sc", "id": "p1"}}
+        event = {"headers": {"authorization": f"Bearer {OWN_TOK}"}, "pathParameters": {"provider": "sc", "id": "p1"}}
         result = handler(event, None)
         assert result["statusCode"] == 200
         assert json.loads(result["body"])["nickname"] == "Private Real"

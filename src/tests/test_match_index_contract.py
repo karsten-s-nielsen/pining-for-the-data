@@ -20,6 +20,8 @@ import pytest
 from formats.provider_metadata import read_metadata_identity
 from mock_api.upload import upload_game
 
+_OWN_TOK = "owner-token-invented-0123456789abcdefXYZ"  # pragma: allowlist secret
+
 LAMBDA_SRC = Path(__file__).parent.parent.parent / "terraform" / "modules" / "functions" / "src"
 sys.path.insert(0, str(LAMBDA_SRC))
 
@@ -142,7 +144,8 @@ def s3(monkeypatch) -> DictS3:
     double = DictS3()
     monkeypatch.setenv("API_TOKEN", "pub-tok")
     monkeypatch.setattr(shared, "_s3_client", double)
-    monkeypatch.setattr(shared, "_get_owner_token", lambda: "own-tok")
+    monkeypatch.setattr(shared, "_get_owner_token", lambda: _OWN_TOK)
+    monkeypatch.setattr(shared, "_get_list_token", lambda: None)
     return double
 
 
@@ -158,7 +161,7 @@ def _upload(s3: DictS3, tmp_path: Path, provider: str, visibility: str, game_id:
 def _list(provider: str) -> tuple[dict, str]:
     import list_matches
 
-    event = {"headers": {"authorization": "Bearer own-tok"}, "pathParameters": {"provider": provider}}
+    event = {"headers": {"authorization": f"Bearer {_OWN_TOK}"}, "pathParameters": {"provider": provider}}
     result = list_matches.handler(event, None)
     assert result["statusCode"] == 200
     return json.loads(result["body"]), result["body"]

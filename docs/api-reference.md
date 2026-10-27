@@ -14,18 +14,39 @@ All endpoints require a bearer token in the `Authorization` header:
 Authorization: Bearer <token>
 ```
 
-The API recognises **two tiers** of bearer token:
+The API recognises **three tiers** of bearer token:
 
 | Tier | Source | Visibility | Use |
 |------|--------|------------|-----|
 | `PUBLIC` | `api_token` in `terraform.tfvars` (the documented default is `test-token-pining-for-the-data`) | Documented in README | Anyone — open-data consumers, CI, demos |
+| `LIST` | SSM Parameter Store SecureString `/pining-for-the-data/api_token_list` | Never committed | List-only consumer (the lakehouse v2 Ops Space); sees every match entry on `/matches`, but no artifact and no private player record |
 | `OWNER` | SSM Parameter Store SecureString `/pining-for-the-data/api_token_owner` | Never committed | Operator-owned consumer (e.g., the Lakehouse adapter); sees private-tier content |
 
-`validate_token` returns one of `Tier.PUBLIC` / `Tier.OWNER` / `401 Invalid token`. Constant-time comparison via `hmac.compare_digest`. **If both tokens collide due to operator misconfiguration, the request classifies as `PUBLIC`** (fail closed; ADR 0001).
+`validate_token` returns one of `Tier.PUBLIC` / `Tier.LIST` / `Tier.OWNER` / `401 Invalid token`. It compares UTF-8 bytes with `hmac.compare_digest` (constant time), so a token with a non-ASCII character gets `401`. **A token that matches two configured tokens (operator misconfiguration) classifies as `PUBLIC`** (fail closed; ADR 0001, ADR 0014), and the Lambda logs `token_collision`.
 
-**Tier semantics — uniform 404 on mismatch.** Private-tier content accessed with the public token returns `404`, identical to "this resource doesn't exist". This prevents enumeration of private content via behaviour fingerprinting. The owner-token holder never hits this path.
+| Tier | `/providers` | `/{provider}/matches` | `/{provider}/matches/{id}/{artifact}` | `/{provider}/players`, `/{provider}/players/{id}` |
+|------|--------------|-----------------------|---------------------------------------|---------------------------------------------------|
+| `PUBLIC` | full list | public entries | `302` for public; `404` for private | public records |
+| `LIST` | full list | all entries (body equals the `OWNER` body) | `404` always | public records (same as `PUBLIC`) |
+| `OWNER` | full list | all entries | `302` for both | public plus private, private wins |
 
-**Rotation.** Update the SSM value via `aws ssm put-parameter --overwrite`, then bump `LAST_ROTATION` env var on all 6 Lambdas via `terraform apply -var=last_rotation=$(date -u +%Y%m%dT%H%M%SZ)`. No dual-validity in v1: consumers MUST implement 401 retry with backoff during the rotation window. See `docs/superpowers/specs/2026-05-02-private-data-tier.md` §3.5.
+**Unset guard (ADR 0014).** A stored `OWNER` or `LIST` value is unusable when it is the Terraform placeholder `placeholder-set-via-cli-after-first-apply`, has fewer than 32 characters, or is not one RFC 6750 `b64token` (`[A-Za-z0-9-._~+/]+=*`, the whole value). An unusable value disables that tier: no presented token matches it, and the Lambda logs `owner_token_unset` or `list_token_unset`. A failure to read the LIST parameter disables only the LIST tier (`list_token_fetch_failed`). A failure to read the owner parameter gives `500` to every request.
+
+**Tier semantics — uniform 404 on mismatch.** Private-tier content accessed with the public token returns `404`, identical to "this resource doesn't exist". This prevents enumeration of private content via behaviour fingerprinting. The owner-token holder never hits this path. The `LIST` token gets the same `404` (`{"error": "Match not found"}`) on **every** artifact, public or private, before any S3 read.
+
+**Rotation.** Do these steps for either SSM token. They generate and store a new value without printing it, keep the project KMS key, and clear the cached token in all 6 Lambdas. `MSYS_NO_PATHCONV=1` stops Git Bash on Windows from converting the parameter name into a Windows path; other shells ignore it.
+
+```bash
+param=/pining-for-the-data/api_token_list   # or /pining-for-the-data/api_token_owner
+key_id="$(MSYS_NO_PATHCONV=1 aws ssm describe-parameters --parameter-filters "Key=Name,Values=$param" --query 'Parameters[0].KeyId' --output text)"
+MSYS_NO_PATHCONV=1 aws ssm put-parameter --name "$param" --type SecureString --key-id "$key_id" --overwrite \
+  --value "$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+ts="$(date -u +%Y%m%dT%H%M%SZ)"
+gh variable set LAST_ROTATION --body "$ts"
+terraform -chdir=terraform/environments/dev apply -var="last_rotation=$ts"
+```
+
+CI applies with the GitHub variable `LAST_ROTATION`, so the variable and the local apply get the same value and the next CI apply changes nothing. To turn the `LIST` tier off without a code change, store the placeholder as its value and run the last three lines. No dual-validity in v1: consumers MUST implement 401 retry with backoff during the rotation window. See `docs/superpowers/specs/2026-05-02-private-data-tier.md` §3.5 and ADR 0014.
 
 ---
 
@@ -37,7 +58,7 @@ The API recognises **two tiers** of bearer token:
 GET /v1/providers
 ```
 
-Returns all registered tracking data providers. **Tier-blind** — returns the same list to both PUBLIC and OWNER (the existence of a provider is not a secret; per-match `visibility` is the only enforcement boundary).
+Returns all registered tracking data providers. **Tier-blind** — returns the same list to the PUBLIC, LIST and OWNER tiers (the existence of a provider is not a secret; per-match `visibility` is the only enforcement boundary).
 
 **Response** `200 OK`
 
@@ -159,6 +180,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 **Tier behaviour**
 
 - PUBLIC tier: receives only entries with `visibility == "public"` (or missing). An empty result on a known provider returns `200 + {"matches": []}`, not 404 — no existence leak.
+- LIST tier: receives all entries. The response body equals the OWNER body (ADR 0014).
 - OWNER tier: receives all entries.
 
 **Error responses**
@@ -170,7 +192,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 | `400` | `{"error": "Invalid dateFrom: ..."}` | `dateFrom` not parseable as YYYY-MM-DD |
 | `400` | `{"error": "Invalid dateTo: ..."}` | `dateTo` not parseable as YYYY-MM-DD |
 | `401` | `{"error": "Missing or malformed Authorization header"}` | No `Authorization: Bearer <token>` header present |
-| `401` | `{"error": "Invalid token"}` | Token does not match either configured value |
+| `401` | `{"error": "Invalid token"}` | Token does not match any configured token (public, LIST or owner), or matches only a disabled one |
 | `404` | `{"error": "Provider not found"}` | No `matches.json` exists for this provider |
 
 ---
@@ -201,8 +223,8 @@ The `Location` header contains a presigned S3 URL (valid for 1 hour by default).
 |--------|------|-------|
 | `400` | `{"error": "Invalid {provider/id/artifact}: ..."}` | A path param fails the safe-character allowlist |
 | `401` | `{"error": "Missing or malformed Authorization header"}` | No bearer header present |
-| `401` | `{"error": "Invalid token"}` | Token does not match either configured value |
-| `404` | `{"error": "Match not found"}` | Match doesn't exist OR is private and the caller is PUBLIC tier |
+| `401` | `{"error": "Invalid token"}` | Token does not match any configured token (public, LIST or owner), or matches only a disabled one |
+| `404` | `{"error": "Match not found"}` | Match doesn't exist OR is private and the caller is PUBLIC tier OR the caller is LIST tier (every artifact, before any S3 read) |
 | `404` | `{"error": "Artifact not found"}` | The artifact name is not a key in the entry's `artifacts` allowlist |
 
 ---
@@ -266,6 +288,7 @@ The canonical `PlayerRecord` shape: required `id` + (`nickname` OR `firstName`+`
 **Tier behaviour**
 
 - PUBLIC tier: receives only entries from `{provider}/players.json`.
+- LIST tier: the same as PUBLIC (ADR 0014).
 - OWNER tier: receives the union of `{provider}/players.json` and `{provider}/_private/players.json`. On cross-tier ID collision, the **private record wins** (private is the more specific real record; spec §6.3.1).
 
 **Error responses**
@@ -302,7 +325,7 @@ Returns a single player reference record. Same provider-gating + private-precede
 |--------|------|-------|
 | `401` | `{"error": "..."}` | Auth failure |
 | `404` | `{"error": "Provider not found"}` | Provider not registered |
-| `404` | `{"error": "Player not found"}` | Player ID not in either index OR found in private-only and caller is PUBLIC tier |
+| `404` | `{"error": "Player not found"}` | Player ID not in either index OR found in private-only and caller is PUBLIC or LIST tier |
 
 ---
 

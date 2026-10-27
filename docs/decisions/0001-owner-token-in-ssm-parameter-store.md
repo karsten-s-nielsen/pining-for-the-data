@@ -36,3 +36,4 @@ Use **SSM Parameter Store SecureString** (`/pining-for-the-data/api_token_owner`
 
 - `docs/superpowers/specs/2026-05-02-private-data-tier.md` §3.3, §3.4 — full design rationale
 - `docs/superpowers/specs/2026-05-02-private-data-tier.md` §3.5, §11.6 — rotation handshake and future zero-downtime upgrade path
+- ADR 0014 — the unset guard and the byte comparison now apply to this token; the `LIST` token uses the same storage

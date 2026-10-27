@@ -47,7 +47,7 @@ resource "aws_iam_role_policy" "lambda_s3" {
       {
         Effect   = "Allow"
         Action   = "ssm:GetParameter"
-        Resource = var.owner_token_param_arn
+        Resource = [var.owner_token_param_arn, var.list_token_param_arn]
       },
     ]
   })
@@ -80,6 +80,7 @@ resource "aws_lambda_function" "list_providers" {
       API_TOKEN         = var.api_token
       DATA_BUCKET       = var.bucket_name
       OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LIST_TOKEN_PARAM  = var.list_token_param_name
       LAST_ROTATION     = var.last_rotation
     }
   }
@@ -105,6 +106,7 @@ resource "aws_lambda_function" "list_matches" {
       API_TOKEN         = var.api_token
       DATA_BUCKET       = var.bucket_name
       OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LIST_TOKEN_PARAM  = var.list_token_param_name
       LAST_ROTATION     = var.last_rotation
     }
   }
@@ -131,6 +133,7 @@ resource "aws_lambda_function" "get_artifact" {
       DATA_BUCKET       = var.bucket_name
       PRESIGNED_EXPIRY  = "3600"
       OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LIST_TOKEN_PARAM  = var.list_token_param_name
       LAST_ROTATION     = var.last_rotation
     }
   }
@@ -175,6 +178,7 @@ resource "aws_lambda_function" "list_players" {
       API_TOKEN         = var.api_token
       DATA_BUCKET       = var.bucket_name
       OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LIST_TOKEN_PARAM  = var.list_token_param_name
       LAST_ROTATION     = var.last_rotation
     }
   }
@@ -200,6 +204,7 @@ resource "aws_lambda_function" "get_player" {
       API_TOKEN         = var.api_token
       DATA_BUCKET       = var.bucket_name
       OWNER_TOKEN_PARAM = var.owner_token_param_name
+      LIST_TOKEN_PARAM  = var.list_token_param_name
       LAST_ROTATION     = var.last_rotation
     }
   }

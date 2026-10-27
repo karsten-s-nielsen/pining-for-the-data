@@ -178,28 +178,33 @@ For private-tier player data, use `--visibility private` along with `--source-na
 
 ---
 
-## Step 6: Set Up Owner-Tier Auth (Optional)
+## Step 6: Set Up Owner-Tier and List-Tier Auth (Optional)
 
-The API supports two authentication tiers. The public token (Step 3) serves open data.
+The API supports three authentication tiers. The public token (Step 3) serves open data.
 An optional **owner token** grants access to private-tier content uploaded with `--visibility private`.
+An optional **LIST token** lists every match entry, private ones included, but gets `404` on every artifact and sees no private player record (ADR 0014).
 
-Create the owner token in SSM Parameter Store:
-
-```bash
-aws ssm put-parameter \
-  --name "/pining-for-the-data/api_token_owner" \
-  --type SecureString \
-  --value "your-secret-owner-token" \
-  --overwrite
-```
-
-Then invalidate Lambda caches so the new token takes effect:
+Terraform creates both SSM parameters with a placeholder value. The API never accepts the placeholder, a value shorter than 32 characters, or a value outside the RFC 6750 `b64token` syntax. Generate and store a value without printing it. `MSYS_NO_PATHCONV=1` stops Git Bash on Windows from converting the parameter name into a Windows path; other shells ignore it.
 
 ```bash
-terraform apply -var=last_rotation=$(date -u +%Y%m%dT%H%M%SZ)
+param=/pining-for-the-data/api_token_owner   # or /pining-for-the-data/api_token_list
+key_id="$(MSYS_NO_PATHCONV=1 aws ssm describe-parameters --parameter-filters "Key=Name,Values=$param" --query 'Parameters[0].KeyId' --output text)"
+MSYS_NO_PATHCONV=1 aws ssm put-parameter --name "$param" --type SecureString --key-id "$key_id" --overwrite \
+  --value "$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 ```
 
-See [`docs/api-reference.md`](../../docs/api-reference.md) for the full two-tier auth contract.
+To hand the value to a consumer, read it in your own terminal, not in a shared or recorded session:
+`MSYS_NO_PATHCONV=1 aws ssm get-parameter --name "$param" --with-decryption --query Parameter.Value --output text`.
+
+Then invalidate the Lambda caches so the new token takes effect. CI applies with the GitHub variable `LAST_ROTATION`, so set it to the same value:
+
+```bash
+ts="$(date -u +%Y%m%dT%H%M%SZ)"
+gh variable set LAST_ROTATION --body "$ts"
+terraform apply -var="last_rotation=$ts"
+```
+
+See [`docs/api-reference.md`](../../docs/api-reference.md) for the full three-tier auth contract.
 
 ---
 

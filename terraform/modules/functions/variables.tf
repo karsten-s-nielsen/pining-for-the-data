@@ -34,8 +34,18 @@ variable "owner_token_param_name" {
   type        = string
 }
 
+variable "list_token_param_arn" {
+  description = "ARN of the SSM parameter holding the LIST-tier API token"
+  type        = string
+}
+
+variable "list_token_param_name" {
+  description = "Name of the SSM parameter holding the LIST-tier API token"
+  type        = string
+}
+
 variable "last_rotation" {
-  description = "No-op marker used to invalidate the warm-container _get_owner_token cache during a rotation. Bump on every owner-token rotation; spec §3.5."
+  description = "No-op marker used to invalidate the warm-container _get_owner_token and _get_list_token caches during a rotation. Bump on every owner- or LIST-token rotation; spec §3.5."
   type        = string
   default     = "initial"
 }

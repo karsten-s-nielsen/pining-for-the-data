@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-27
+
+### Added
+- **`LIST` token tier** (list-only) for the lakehouse v2 Ops Space — a third bearer token in the SSM SecureString `/pining-for-the-data/api_token_list`. With it, `GET /v1/{provider}/matches` returns the same body as the owner token (private entries included), every artifact request gets the uniform `404` (`{"error": "Match not found"}`) before any S3 read, and the player endpoints behave as with the public token. ADR 0014.
+- **One tier-policy table** in `shared.py` (`TierPolicy`, `policy_for`): handlers ask it and never compare a tier value; a tier missing from the table gets no access.
+- `scripts/verify_list_token_tier.py` — live verify of every tier: the placeholder gets `401`, PUBLIC lists no private entry, LIST `/matches` equals OWNER with and without each filter, LIST gets `404` on sampled public and private artifacts (with `302` controls), LIST equals PUBLIC on the player endpoints and `/providers`, and the PUBLIC/OWNER responses equal a snapshot taken before the merge (`--snapshot`, `--before-token`, `--compare`). It can read the LIST token from SSM (`--list-token-from-ssm`) and never prints a token or a private id.
+- Terraform: `aws_ssm_parameter.api_token_list`, `LIST_TOKEN_PARAM` on the five authed Lambdas, the Lambda role may read both token parameters, and the outputs `list_token_param_arn` / `list_token_param_name`.
+
+### Changed
+- **Unset guard on both SSM tokens** — a stored owner or LIST value that is the Terraform placeholder `placeholder-set-via-cli-after-first-apply`, has fewer than 32 characters, or is not one RFC 6750 `b64token` now disables its tier (`owner_token_unset` / `list_token_unset`). The live owner token passes the guard.
+- **Token comparison uses UTF-8 bytes** — a presented token with a non-ASCII character now gets `401` instead of an unhandled `TypeError`. A token that matches two configured tokens classifies as `PUBLIC` and logs `token_collision`.
+- A failure to read the LIST parameter disables only the LIST tier (`list_token_fetch_failed`); PUBLIC and OWNER keep working. An owner-parameter failure still gives `500`.
+- **Rotation docs** — `docs/api-reference.md`, `AGENTS.md` and `terraform/docs/setup.md` now include the GitHub variable `LAST_ROTATION` (which CI applies with) and a command that generates and stores a value without printing it.
+- `RateLimiter` and `with_retry` moved from `scripts/verify_match_index_fields.py` to `scripts/_verify_http.py`, unchanged, so both verify scripts share them.
+- Dependency: `fsspec` 2026.2.0 → 2026.6.0 (PYSEC-2026-4217; only in the `publish` extra, through `huggingface_hub`), Dependabot #76.
+- Test count: 645 → 724 (+79 tests: the policy table, classification and collisions, the unset guard and isolation for both tokens, every endpoint for every tier, the handler and Terraform guards, and the LIST verify script).
+
 ## [0.9.0] - 2026-10-27
 
 ### Added
@@ -186,7 +203,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ARCHITECTURE.md with C4 diagrams
 - CI pipeline (ruff, pyright, pytest) via GitHub Actions
 
-[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.7.0...v0.8.0

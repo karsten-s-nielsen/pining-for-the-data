@@ -6,12 +6,12 @@ import json
 import os
 
 from shared import (
-    Tier,
     apply_filters,
     get_s3_client,
     json_response,
     logger,
     parse_query_filters,
+    policy_for,
     validate_path_param,
     validate_token,
 )
@@ -25,7 +25,8 @@ def handler(event: dict, context: object) -> dict:
     """Return the matches index for a provider, filtered by caller's tier.
 
     Spec §4.2: PUBLIC tier sees only entries with visibility == "public" (or
-    missing, treated as public). OWNER tier sees all entries. Empty filtered
+    missing, treated as public). LIST and OWNER tiers see all entries; the LIST
+    body equals the OWNER body (ADR 0014). Empty filtered
     list returns 200 with `{"matches": []}` — not 404 — so the public tier
     cannot probe for the existence of any private matches.
 
@@ -60,7 +61,7 @@ def handler(event: dict, context: object) -> dict:
 
     match_list = matches.get("matches", [])
 
-    if tier != Tier.OWNER:
+    if not policy_for(tier).lists_private_matches:
         # Filter to public entries (missing `visibility` field defaults to public).
         match_list = [m for m in match_list if m.get("visibility", "public") == "public"]
 

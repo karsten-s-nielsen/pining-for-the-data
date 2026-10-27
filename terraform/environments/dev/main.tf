@@ -36,6 +36,18 @@ resource "aws_ssm_parameter" "api_token_owner" {
   }
 }
 
+resource "aws_ssm_parameter" "api_token_list" {
+  name        = "/${var.project_name}/api_token_list"
+  description = "List-only-tier bearer token for the mock provider API"
+  type        = "SecureString"
+  key_id      = module.storage.kms_key_arn
+  value       = "placeholder-set-via-cli-after-first-apply"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 module "functions" {
   source                 = "../../modules/functions"
   project_name           = var.project_name
@@ -45,6 +57,8 @@ module "functions" {
   api_token              = var.api_token
   owner_token_param_arn  = aws_ssm_parameter.api_token_owner.arn
   owner_token_param_name = aws_ssm_parameter.api_token_owner.name
+  list_token_param_arn   = aws_ssm_parameter.api_token_list.arn
+  list_token_param_name  = aws_ssm_parameter.api_token_list.name
   last_rotation          = var.last_rotation
 }
 

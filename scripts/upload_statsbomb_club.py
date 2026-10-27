@@ -99,6 +99,7 @@ def upload_bundle(root: Path, bucket: str) -> tuple[str, int]:
             away=info.away,
             source_name=SOURCE_NAME,
             source_licence=SOURCE_LICENCE,
+            **info.competition.as_kwargs(),
         )
 
     if players:

@@ -1,0 +1,16 @@
+{
+  "id": 9000002,
+  "home_team_score": 1,
+  "away_team_score": 1,
+  "date_time": "2099-09-20T15:00:00Z",
+  "home_team": {"id": 3, "name": "Synthetic Harbour FC", "short_name": "Synthetic Harbour"},
+  "away_team": {"id": 4, "name": "Invented Valley SC", "short_name": "Invented Valley"},
+  "competition_edition": {
+    "id": 4001,
+    "competition": {"id": 301, "name": "Synthetic Premier"},
+    "season": {"id": 701, "name": "2099/2100"}
+  },
+  "pitch_length": 105.0,
+  "pitch_width": 68.0,
+  "players": []
+}

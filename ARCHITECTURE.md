@@ -104,6 +104,9 @@ Read and validate provider-specific tracking data.
 | `idsse.py` | Implemented | IDSSE / DFL / Sportec | DFL XML (matchinformation parsed for index metadata; positions/events served as-is) |
 | `statsbomb.py` | Implemented | StatsBomb (commercial 360, owner tier; `provenance="original"`) | Club file drop — de-pivots `statsbombpy` column-orient dumps and re-nests the match row to feed shape (ADR 0010); events/frames/lineups served as-is |
 | `statsbomb_open.py` | Implemented | StatsBomb (open-data tournaments, owner tier; `provenance="redistributed"`) | Second source family under the same slug — six complete-tournament open-data 360 competitions (292 matches). Pure transforms over the real published feed: no de-pivot, no competition join, no team-id resolution; `build_metadata_open` reshapes the already-nested match object to the same canonical metadata schema as the commercial family. Not redistributable (StatsBomb Public Data User Agreement) — owner tier only (ADR 0012) |
+| `gradientsports.py` | Implemented | Gradient Sports (owner tier) | Pure reader for one `Metadata/{id}.json` document: match id, date, teams, and the competition/season identity (`season` is a name; no season id — ADR 0013) |
+| `competition_season.py` | Implemented | All providers | The shared value rules for `competition_id`, `competition_name`, `season_id`, `season_name`: an `int` id becomes its decimal string, a string is kept verbatim, `None`/`""` is absent, any other type is refused (ADR 0013) |
+| `provider_metadata.py` | Implemented | All providers | Dispatches a stored metadata artifact to its provider's reader (match id + competition/season identity); used by the backfill and the live verify |
 | `respovision.py` | Scaffolded | Respo.Vision | JSON, 3D pose, 50+ keypoints |
 | `convert.py` | Scaffolded | Cross-format | Respo.Vision 3D -> SkillCorner-equivalent 2D |
 
@@ -115,7 +118,7 @@ Read and validate provider-specific tracking data.
 
 ### 3.4 Mock API (`src/mock_api/`)
 
-Upload CLIs (`upload.py`, `upload_players.py`) for S3 data management. Lambda handlers live in `terraform/modules/functions/src/`. Canonical Pydantic models (`MatchEntry`, `PlayerRecord`) in `src/canonical/models.py` are the single source of truth for the index shapes; JSON Schemas in `schemas/` are generated from them and drift-tested.
+Upload CLIs (`upload.py`, `upload_players.py`) for S3 data management. `artifact_meta.py` hashes the staged bytes into each entry's `artifact_meta` (sha256/size), and `index_records.py` holds the change contract: `updated_at` changes only when a record changes (ADR 0013). Lambda handlers live in `terraform/modules/functions/src/`. Canonical Pydantic models (`MatchEntry`, `PlayerRecord`) in `src/canonical/models.py` are the single source of truth for the index shapes; JSON Schemas in `schemas/` are generated from them and drift-tested.
 
 | Endpoint | Handler | Purpose |
 |----------|---------|---------|
@@ -155,7 +158,7 @@ AWS (effectively $0/month at expected volume)
                                  (auth on 5 data handlers; health is unauthenticated for synthetic monitoring)
 ```
 
-Terraform modules in `terraform/`. Audit logging is provisioned via `terraform/modules/audit/`. See [setup guide](terraform/docs/setup.md) and [ADR 0001-0010](docs/decisions/) for design rationale.
+Terraform modules in `terraform/`. Audit logging is provisioned via `terraform/modules/audit/`. See [setup guide](terraform/docs/setup.md) and [ADR 0001-0013](docs/decisions/) for design rationale.
 
 ---
 

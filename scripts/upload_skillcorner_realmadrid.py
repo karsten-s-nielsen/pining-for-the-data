@@ -43,8 +43,16 @@ SOURCE_LICENCE = "Restricted; redistribution not permitted"
 
 
 def _gzip_file(src: Path, dest: Path) -> None:
-    """Stream-gzip src -> dest in 1 MiB chunks (never loads the body into memory)."""
-    with src.open("rb") as f_in, gzip.open(dest, "wb") as f_out:
+    """Stream-gzip src -> dest in 1 MiB chunks (never loads the body into memory).
+
+    The gzip header is fixed (mtime 0, no file name), so the same source always stages the same
+    bytes and a re-upload keeps its artifact sha256 and updated_at (ADR 0013).
+    """
+    with (
+        src.open("rb") as f_in,
+        dest.open("wb") as raw,
+        gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as f_out,
+    ):
         shutil.copyfileobj(f_in, f_out, length=1 << 20)
 
 
@@ -133,6 +141,7 @@ def upload_all(root: Path, bucket: str, limit: int | None = None) -> tuple[int, 
                 away=info.away,
                 source_name=SOURCE_NAME,
                 source_licence=SOURCE_LICENCE,
+                **info.competition.as_kwargs(),
             )
         uploaded += 1
 

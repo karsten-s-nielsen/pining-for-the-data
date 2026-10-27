@@ -105,3 +105,30 @@ def test_reader_against_real_matchinformation(load_script) -> None:
     assert _re.fullmatch(r"DFL-MAT-[A-Z0-9]+", info.match_id)
     assert _re.fullmatch(r"\d{4}-\d{2}-\d{2}", info.date)
     assert info.home and info.away
+
+
+# --- competition/season identity (spec §5.2) -------------------------------------------------
+
+
+def test_idsse_competition_from_general():
+    from formats.competition_season import CompetitionSeason
+
+    info = read_match_information(FIXTURES_DIR / "idsse_matchinformation_synthetic.xml")
+    assert info.competition == CompetitionSeason("DFL-COM-000099", "Synthetic League", "DFL-SEA-SYN001", "2099/2100")
+
+
+def test_idsse_bytes_and_path_agree():
+    from formats.idsse import read_match_information_bytes
+
+    path = FIXTURES_DIR / "idsse_matchinformation_synthetic.xml"
+    assert read_match_information_bytes(path.read_bytes()) == read_match_information(path)
+
+
+def test_idsse_missing_source_value_gives_absent_field():
+    from formats.idsse import read_match_information_bytes
+
+    data = (FIXTURES_DIR / "idsse_matchinformation_synthetic.xml").read_bytes()
+    data = data.replace(b' Season="2099/2100"', b"")
+    info = read_match_information_bytes(data)
+    assert info.competition.season_name is None
+    assert info.competition.season_id == "DFL-SEA-SYN001"

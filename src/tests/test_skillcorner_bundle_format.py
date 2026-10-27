@@ -184,3 +184,35 @@ class TestLoadMetaFixture:
         assert info.away == "Synthetic Away CF"
         players = players_from_meta(meta)
         assert {p["id"] for p in players} == {"7000001", "7000002"}
+
+
+# --- competition/season identity (spec §5.2) -------------------------------------------------
+
+
+def _competition_meta() -> dict:
+    import json
+
+    return json.loads((FIXTURES_DIR / "skillcorner_v3_meta_competition_synthetic.json").read_text(encoding="utf-8"))
+
+
+def test_bundle_match_info_competition():
+    from formats.competition_season import CompetitionSeason
+
+    info = match_info(_competition_meta())
+    assert info.match_id == "9000002"
+    assert info.competition == CompetitionSeason("301", "Synthetic Premier", "701", "2099/2100")
+
+
+def test_bundle_missing_source_value_gives_absent_field():
+    meta = _competition_meta()
+    del meta["competition_edition"]["season"]["name"]
+    info = match_info(meta)
+    assert info.competition.season_name is None
+    assert info.competition.season_id == "701"
+
+
+def test_bundle_meta_without_edition_has_absent_competition():
+    from formats.competition_season import CompetitionSeason
+
+    meta = load_meta(FIXTURES_DIR / "skillcorner_bundle_meta_synthetic.json")
+    assert match_info(meta).competition == CompetitionSeason()

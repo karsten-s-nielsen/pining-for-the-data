@@ -28,3 +28,36 @@ def test_gzips_gz_specs_copies_plain_and_writes_metadata(tmp_path) -> None:
         assert json.load(f) == [{"id": "e1"}]
     assert json.loads((staging / "roster.json").read_text(encoding="utf-8")) == [{"team_id": 1}]
     assert json.loads((staging / "metadata.json").read_text(encoding="utf-8")) == {"match_id": 42}
+
+
+# --- reproducible gzip header (spec §5.8) ----------------------------------------------------
+
+
+def test_gzip_header_fixed(tmp_path) -> None:
+    import gzip
+
+    from mock_api.staging import _gzip_file
+
+    src = tmp_path / "events.json"
+    src.write_bytes(b'[{"synthetic": 1}]')
+    dest = tmp_path / "events.json.gz"
+    _gzip_file(src, dest)
+    data = dest.read_bytes()
+    assert data[4:8] == b"\x00\x00\x00\x00"  # MTIME
+    assert data[3] & 0x08 == 0  # FNAME flag clear
+    assert gzip.decompress(data) == b'[{"synthetic": 1}]'
+
+
+def test_gzip_twice_identical(tmp_path, monkeypatch) -> None:
+    import time
+
+    from mock_api.staging import _gzip_file
+
+    src = tmp_path / "events.json"
+    src.write_bytes(b'[{"synthetic": 1}]')
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    _gzip_file(src, tmp_path / "a" / "events.json.gz")
+    monkeypatch.setattr(time, "time", lambda: 4102444800.0)  # a later run, another clock value
+    _gzip_file(src, tmp_path / "b" / "events.json.gz")
+    assert (tmp_path / "a" / "events.json.gz").read_bytes() == (tmp_path / "b" / "events.json.gz").read_bytes()

@@ -38,6 +38,13 @@ class _SourceMeta(BaseModel):
     licence: str = ""
 
 
+class ArtifactMeta(BaseModel):
+    """Content identity of one stored artifact object: the bytes as stored in S3 (ADR 0013)."""
+
+    sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$", description="Lowercase hex SHA-256 of the stored bytes")
+    size: int = Field(..., ge=0, description="Size of the stored object in bytes")
+
+
 class MatchEntry(BaseModel):
     """Canonical shape of a single entry in `{provider}/matches.json`. Spec §4.1."""
 
@@ -68,6 +75,31 @@ class MatchEntry(BaseModel):
         default=None,
         description="Artifact-format generation. Absent = legacy layout; 2 = canonical Parquet/zstd set.",
     )
+    # Competition/season identity, verbatim from the match's own metadata artifact (ADR 0013).
+    # Absent = the source gives no value; a value is never inferred (ADR 0010).
+    competition_id: str | None = Field(
+        default=None, pattern=_PATH_PARAM_RE, max_length=128, description="Provider's competition id, verbatim"
+    )
+    competition_name: str | None = Field(default=None, min_length=1, description="Provider's competition name")
+    season_id: str | None = Field(
+        default=None,
+        pattern=_PATH_PARAM_RE,
+        max_length=128,
+        description="Provider's season id, verbatim; absent when the source gives no season id",
+    )
+    season_name: str | None = Field(default=None, min_length=1, description="Provider's season value, verbatim")
+    artifact_meta: dict[str, ArtifactMeta] | None = Field(
+        default=None,
+        description="Per-artifact content identity of the stored objects. Keys equal the `artifacts` keys.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_artifact_meta_keys(self) -> MatchEntry:
+        if self.artifact_meta is not None and set(self.artifact_meta) != set(self.artifacts):
+            raise ValueError(
+                f"artifact_meta keys {sorted(self.artifact_meta)} must equal artifacts keys {sorted(self.artifacts)}"
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_artifact_keys(self) -> MatchEntry:

@@ -169,6 +169,7 @@ def upload_all(bucket: str, limit: int | None = None) -> int:
                 source_name=SOURCE_NAME,
                 source_url=SOURCE_URL,
                 source_licence=SOURCE_LICENCE,
+                **info.competition.as_kwargs(),
             )
             uploaded += 1
     return uploaded

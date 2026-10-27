@@ -21,6 +21,26 @@ def name_pools_dir() -> Path:
     return NAME_POOLS_DIR
 
 
+@pytest.fixture
+def upload_recorder():
+    """A fake ``upload_game`` and its call log: ``(fake_upload_game, calls)``.
+
+    Each call appends ``(staged artifact_meta, kwargs)``. The loaders stage into a
+    TemporaryDirectory that is deleted once they return, so the staged bytes are hashed
+    at call time. Returns the sorted artifact names, as ``upload_game`` does.
+    """
+    from mock_api.artifact_meta import staged_artifact_meta
+
+    calls: list[tuple[dict, dict]] = []
+
+    def fake_upload_game(**kw):
+        meta = staged_artifact_meta(kw["game_dir"])
+        calls.append((meta, kw))
+        return sorted(meta)
+
+    return fake_upload_game, calls
+
+
 @pytest.fixture(scope="session")
 def load_script():
     """Return a loader that imports scripts/<name>.py as a module.

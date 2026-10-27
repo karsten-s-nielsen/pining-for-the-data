@@ -1,5 +1,7 @@
 import pytest
 
+from formats.competition_season import CompetitionSeason
+
 
 @pytest.fixture(scope="module")
 def mod(load_script):
@@ -69,10 +71,12 @@ def test_complete_matches_filters_incomplete(mod) -> None:
 
 
 class _Info:
+    # Mirrors formats.idsse.MatchInfo, including the competition/season identity field.
     match_id = "DFL-MAT-ABC123"
     date = "2099-08-15"
     home = "Test Home FC"
     away = "Test Away FC"
+    competition = CompetitionSeason()
 
 
 def test_upload_all_orchestration(monkeypatch, mod) -> None:

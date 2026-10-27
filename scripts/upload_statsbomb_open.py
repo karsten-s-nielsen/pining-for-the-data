@@ -126,6 +126,7 @@ def _stage_and_upload_open_match(
             away=info.away,
             source_name=SOURCE_NAME,
             source_licence=SOURCE_LICENCE,
+            **info.competition.as_kwargs(),
         )
     if new_players:
         with tempfile.TemporaryDirectory(prefix="sb-open-players-") as tmp:

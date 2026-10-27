@@ -9,8 +9,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             ingestCli = container "Ingest CLI" "Validates SkillCorner V3 match JSON + tracking JSONL" "Python 3.12+, pining-ingest"
             rosterCli = container "Roster Generator CLI" "Generates synthetic rosters with fictional identities for de-identification" "Python 3.12+, pining-generate-roster"
             deidentify = container "De-identification Engine" "Two-layer jersey-to-identity mapping using fictional name pools" "Python 3.12+"
-            formats = container "Format Handlers" "Validate SkillCorner V3; parse bundle/DFL/StatsBomb metadata for the index; re-nest the StatsBomb 360 delivery (ADR 0010); reshape the StatsBomb open-data family (statsbomb_open.py, ADR 0012 — the purest ADR-0010 case: the real published feed, no de-pivot/join/resolution); shared staging.py extraction used by both StatsBomb families; transform owner-tier SkillCorner to the canonical Parquet/zstd set (ADR 0011)" "Python 3.12+, JSON/JSONL/XML/Parquet"
-            uploadCli = container "Upload CLI (Matches)" "Uploads game artifacts; --visibility public|private; validates against MatchEntry Pydantic model" "Python 3.12+, boto3, pining-upload"
+            formats = container "Format Handlers" "Validate SkillCorner V3; parse bundle/DFL/StatsBomb metadata for the index; re-nest the StatsBomb 360 delivery (ADR 0010); reshape the StatsBomb open-data family (statsbomb_open.py, ADR 0012 — the purest ADR-0010 case: the real published feed, no de-pivot/join/resolution); shared staging.py extraction used by both StatsBomb families; transform owner-tier SkillCorner to the canonical Parquet/zstd set (ADR 0011); competition/season readers (ADR 0013)" "Python 3.12+, JSON/JSONL/XML/Parquet"
+            uploadCli = container "Upload CLI (Matches)" "Uploads game artifacts; --visibility public|private; validates MatchEntry before any S3 write; sets artifact_meta (sha256/size); updated_at only on a real change (ADR 0013)" "Python 3.12+, boto3, pining-upload"
             uploadPlayersCli = container "Upload CLI (Players)" "Canonical-JSON-only player catalogue uploads; rejects CSV with reference to Gradient Sports orchestrator" "Python 3.12+, boto3, pining-upload-players"
             publishCli = container "Publish CLI" "Pushes Parquet files and dataset cards to HuggingFace Hub" "Python 3.12+, huggingface_hub, pining-publish"
             gradientOrchestrator = container "Gradient Sports Orchestrator" "One-shot script: reshape Gradient Sports source layout, normalise CSV to canonical JSON, drive uploadCli + uploadPlayersCli for the bulk load" "Python 3.12+, scripts/upload_gradient_wc2022.py"
@@ -27,6 +27,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             skillcornerOpendataVerify = container "SkillCorner Public Open-Data Verify Script" "Post-load HTTP verification (public token): match count incl. every new id, skillcorner in /providers, non-empty /players, a sampled new match serves its four id-prefixed artifacts, and each new match's tracking body is real JSONL (not an unresolved Git-LFS pointer)" "Python 3.12+, scripts/verify_skillcorner_opendata_load.py"
             statsbombOrchestrator = container "StatsBomb Orchestrator" "One-shot script: delivery-coherence pre-flight, de-pivot + re-nest the match row to feed shape, stage/gzip the four role-aligned artifacts, drive uploadCli + uploadPlayersCli (owner tier)" "Python 3.12+, scripts/upload_statsbomb_club.py"
             statsbombOpenOrchestrator = container "StatsBomb Open-Data Orchestrator" "One-shot script: fetch+cache the real open-data feed over raw HTTPS, delivery-coherence pre-flight, build_metadata_open reshape (no de-pivot/join — the real feed), same-tier skip-and-report players, two-dir stage of the four role artifacts, drive uploadCli + uploadPlayersCli (owner tier, provenance=redistributed, ADR 0012)" "Python 3.12+, scripts/upload_statsbomb_open.py"
+            matchIndexBackfill = container "Match Index Backfill" "One-shot, two-pass: sets competition/season fields + artifact_meta on every live entry; pass 1 reads, checks, hashes (any error stops it); pass 2 IfMatch write (ADR 0013)" "Python 3.12+, scripts/backfill_match_competition_and_artifact_meta.py"
+            matchIndexVerify = container "Match Index Verify Script" "Cross-provider HTTP check (owner token): fields equal the metadata artifact, artifact_meta keys, sizes by Range GET, optional --full-hash; 8 rps with 429/5xx retry" "Python 3.12+, scripts/verify_match_index_fields.py"
             statsbombVerify = container "StatsBomb Verify Script" "Post-load HTTP verification: owner-vs-public tier split, exact artifact key set (events, freeze_frames, roster, metadata), metadata envelope shape, Range GET for large bodies; also samples one provenance=redistributed open-data match (owner sees it; public gets 404)" "Python 3.12+, scripts/verify_statsbomb_load.py"
 
             apiGateway = container "API Gateway" "REST API with bearer token auth, throttled (10 rps / 50 burst)" "AWS API Gateway HTTP API"
@@ -84,6 +86,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         operator -> statsbombOrchestrator "Loads the commercial StatsBomb 360 delivery (owner tier)" "Shell"
         operator -> statsbombOpenOrchestrator "Loads the open-data tournament 360 (owner tier)" "Shell"
         operator -> statsbombVerify "Runs StatsBomb post-load verification" "Shell"
+        operator -> matchIndexBackfill "Backfills competition/season fields + artifact_meta (dry-run, then --apply)" "Shell"
+        operator -> matchIndexVerify "Runs the cross-provider match-index verification" "Shell"
         operator -> ssmParam "Sets owner token (out-of-band)" "aws ssm put-parameter"
 
         skillcorner -> formats "Source tracking data (git clone)" "Git LFS"
@@ -133,6 +137,11 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         statsbombOpenOrchestrator -> uploadCli "Drives per-match upload (visibility=private, provenance=redistributed)" "Python import"
         statsbombOpenOrchestrator -> uploadPlayersCli "Drives player catalogue upload; same-tier skip-and-report (visibility=private)" "Python import"
         statsbombVerify -> apiGateway "Polls endpoints with both tokens; asserts post-conditions" "HTTPS"
+        matchIndexBackfill -> formats "Reads each stored metadata artifact with its provider's reader" "Python import"
+        matchIndexBackfill -> canonicalModels "Validates every backfilled MatchEntry before the write" "Python import"
+        matchIndexBackfill -> dataBucket "Stream-hashes stored objects; one IfMatch write of each matches.json" "boto3 S3 API"
+        matchIndexVerify -> formats "Parses each fetched metadata artifact" "Python import"
+        matchIndexVerify -> apiGateway "Lists matches and fetches artifacts with the owner token" "HTTPS"
 
         apiGateway -> lambdaProviders "GET /v1/providers" "Lambda proxy"
         apiGateway -> lambdaMatches "GET /v1/{provider}/matches" "Lambda proxy"
@@ -221,6 +230,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
                 containerInstance statsbombOrchestrator
                 containerInstance statsbombOpenOrchestrator
                 containerInstance statsbombVerify
+                containerInstance matchIndexBackfill
+                containerInstance matchIndexVerify
                 containerInstance canonicalModels
                 containerInstance schemas
             }
@@ -234,7 +245,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         }
 
         # Level 2 is split into one runtime view plus per-concern / per-provider
-        # slices. A single `include *` container view renders all 31 containers
+        # slices. A single `include *` container view renders all 33 containers
         # (41 element nodes) — past the ~15-per-view readability guideline, and it
         # degraded with every provider added (each brings an orchestrator + a
         # verify script). The split is a VIEWS-only concern: the model is
@@ -290,6 +301,13 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         container pining "Containers_StatsBomb" {
             include operator statsbomb statsbombOrchestrator statsbombOpenOrchestrator statsbombVerify
             include formats uploadCli uploadPlayersCli dataBucket apiGateway
+            autoLayout
+        }
+
+        # Cross-provider match index: competition/season fields + artifact_meta (ADR 0013).
+        container pining "Containers_MatchIndex" {
+            include operator matchIndexBackfill matchIndexVerify
+            include formats canonicalModels dataBucket apiGateway
             autoLayout
         }
 

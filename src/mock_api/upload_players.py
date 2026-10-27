@@ -11,7 +11,8 @@ be normalised to canonical JSON by a provider-specific adapter; see
 scripts/upload_gradient_wc2022.py for a worked example.
 
 Existing players (by id, within the same tier) are updated in place; new
-players are appended; updated_at is set on every write.
+players are appended. updated_at changes only when a record changes: a
+byte-identical re-upload of a record keeps its stored updated_at (ADR 0013).
 
 Tier mixing is rejected at two levels:
 - within the same file: re-uploading a public id with --visibility private fails
@@ -30,6 +31,7 @@ import boto3
 
 from canonical.models import PlayerRecord
 from mock_api._cli_common import handle_cli_errors, utc_now_iso, validate_param
+from mock_api.index_records import carry_updated_at
 
 _CSV_REJECTION_MESSAGE = (
     "pining-upload-players accepts canonical JSON only (a list of PlayerRecord objects, "
@@ -78,7 +80,7 @@ def upload_players(
             }
         # PlayerRecord.model_validate raises ValidationError with field-level diagnostics.
         validated = PlayerRecord.model_validate(record)
-        # Always refresh updated_at on this write.
+        # A fresh updated_at; the merge below keeps the stored one when the record is unchanged.
         dumped = validated.model_dump(exclude_none=True)
         dumped["updated_at"] = now
         new_records.append(dumped)
@@ -111,7 +113,7 @@ def upload_players(
                 f"Cannot mix tiers for player id {new['id']!r}: existing "
                 f"{prior.get('visibility')!r} vs requested {visibility!r}"
             )
-        by_id[new["id"]] = new
+        by_id[new["id"]] = carry_updated_at(new, prior)
 
     merged = sorted(by_id.values(), key=lambda p: p["id"])
     payload = {"provider": provider, "players": merged}

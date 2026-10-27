@@ -104,13 +104,57 @@ curl -H "Authorization: Bearer $TOKEN" \
         "tracking": "tracking.jsonl"
       },
       "visibility": "public",
-      "updated_at": "2026-05-03T16:42:00Z"
+      "updated_at": "2026-05-03T16:42:00Z",
+      "competition_id": "1001",
+      "competition_name": "Example League",
+      "season_id": "2001",
+      "season_name": "2025/2026",
+      "artifact_meta": {
+        "match": {
+          "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+          "size": 2048
+        },
+        "tracking": {
+          "sha256": "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",
+          "size": 1048576
+        }
+      }
     }
   ]
 }
 ```
 
-`artifacts` is an object mapping artifact name → exact filename. The keys form the API's allowlist: `get_artifact` rejects any name not present here. `visibility` is `"public"` or `"private"` (missing = `"public"` for backwards compatibility). `updated_at` is set by the upload tooling on every write, including no-op re-uploads — consumers can poll it for incremental refresh.
+**Entry fields**
+
+| Field | Type | Presence | Meaning |
+|-------|------|----------|---------|
+| `id` | string | always | Match id; matches `^[a-zA-Z0-9][a-zA-Z0-9_-]*$` (max 128) |
+| `artifacts` | object | always | Artifact name → exact filename. The keys form the API's allowlist for Get Artifact |
+| `visibility` | `"public"` \| `"private"` | always (missing = `"public"`, legacy) | Tier of the entry |
+| `updated_at` | ISO 8601 UTC string | always | Changes only when the entry changes (see below) |
+| `date` | `YYYY-MM-DD` | optional | Match date |
+| `home`, `away` | string | optional | Team names |
+| `provenance` | string | optional | `"redistributed"`, `"deidentified"` or `"original"` |
+| `source` | object | optional | `{name, url, licence}` of the upstream source |
+| `format_version` | integer | optional | `2` = the canonical Parquet/zstd set (ADR 0011); absent = legacy layout |
+| `competition_id` | string | optional | The provider's competition id, verbatim |
+| `competition_name` | string | optional | The provider's competition name, verbatim |
+| `season_id` | string | optional | The provider's season id, verbatim |
+| `season_name` | string | optional | The provider's season value, verbatim |
+| `artifact_meta` | object | every entry (optional in the schema) | Artifact name → `{"sha256": <lowercase hex>, "size": <bytes>}` of the object bytes as stored and served. Its keys equal the `artifacts` keys |
+
+`visibility` is `"public"` or `"private"` (missing = `"public"` for backwards compatibility). Unset optional fields are absent, not null.
+
+**Competition and season fields.** Each value comes from the match's own metadata artifact, in the role the source gives it. A value the source does not give is absent: it is never inferred, and a name is never copied into an id or an id into a name (ADR 0010, ADR 0013). An integer source id is served as its decimal string. season_id absent means the source gives no season id; season_name is the source value verbatim.
+
+| Provider | Metadata artifact | `competition_id` / `competition_name` | `season_id` / `season_name` |
+|----------|-------------------|---------------------------------------|-----------------------------|
+| `gradientsports` | `metadata` | `competition.id` / `competition.name` | absent / `season` |
+| `idsse` | `metadata` | `General@CompetitionId` / `@CompetitionName` | `@SeasonId` / `@Season` |
+| `skillcorner` (both tiers) | `metadata` (owner tier), `{id}_match` (public tier) | `competition_edition.competition.id` / `.name` | `competition_edition.season.id` / `.name` |
+| `statsbomb` | `metadata` | `competition.competition_id` / `competition_name` | `season.season_id` / `season_name` |
+
+`updated_at` changes only when the entry changes: any entry field, or the `sha256` of any artifact. A byte-identical re-upload does not change it. Clients can poll it with `updatedSince` for incremental refresh. Clients should compare each artifact's `artifact_meta.sha256` with their stored copy before they download it.
 
 **Tier behaviour**
 
@@ -216,6 +260,8 @@ Returns the player reference catalogue for a provider, **filtered by tier**. Pro
 The canonical `PlayerRecord` shape: required `id` + (`nickname` OR `firstName`+`lastName`); optional `dob`, `height`, `position`, `positionGroupType`, `nationality`, `source`. Provider-specific extension fields (anything beyond the canonical set) are round-tripped verbatim. JSON Schema published at `schemas/players.schema.json` with stable URN `urn:pining-for-the-data:schema:players:v1`.
 
 **Unset optional fields are absent, not null.** `pining-upload-players` serialises records with `model_dump(exclude_none=True)`, so an optional field a provider never populated is omitted from the served JSON rather than emitted as `null`. Consumers must test for **absence** (`"firstName" in record`) rather than for a null value — `record["firstName"] is None` raises `KeyError`. This is why some providers' records carry only `nickname` and no `firstName`/`lastName` split: those fields are never populated at source, so they never appear in the response at all.
+
+`updated_at` changes only when the record changes: any record field. A byte-identical re-upload does not change it. Clients can poll it with `updatedSince` for incremental refresh.
 
 **Tier behaviour**
 

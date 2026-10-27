@@ -18,6 +18,7 @@ This directory contains [Architecture Decision Records](https://adr.github.io/) 
 | [0010](0010-faithful-feed-mimicry.md) | Faithful-Feed Mimicry | Accepted | StatsBomb commercial 360 owner-tier ingest (spec §3) |
 | [0011](0011-canonical-owner-tier-skillcorner-format.md) | Canonical Owner-Tier SkillCorner Format (Columnar Parquet/zstd) | Accepted | SkillCorner footprint + format convergence (spec 2026-09-01) |
 | [0012](0012-statsbomb-open-data-second-source-family.md) | StatsBomb Open-Data as a Second Source Family | Accepted | StatsBomb open-data tournaments owner-tier ingest (spec §9) |
+| [0013](0013-entry-change-contract-and-artifact-content-identity.md) | Entry Change Contract and Artifact Content Identity | Accepted | Competition/season fields + artifact identity (spec 2026-10-26) |
 
 ## Format
 

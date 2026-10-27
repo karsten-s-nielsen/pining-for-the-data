@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NoReturn
+
+from formats.competition_season import CompetitionSeason, native_id, native_name
 
 # Source filenames as delivered.
 SOURCE_FILES: dict[str, str] = {
@@ -228,6 +230,7 @@ class MatchInfo:
     date: str
     home: str
     away: str
+    competition: CompetitionSeason = field(default_factory=CompetitionSeason)
 
 
 def _int_or_none(value: float | None) -> int | None:
@@ -349,7 +352,20 @@ def match_info(metadata: dict) -> MatchInfo:
         raise ValueError("metadata lacks match_date — refusing to upload a match that cannot be found by date")
     if not home or not away:
         raise ValueError("metadata lacks home and/or away team name")
-    return MatchInfo(match_id=str(match_id), date=date, home=home, away=away)
+    competition = metadata.get("competition") or {}
+    season = metadata.get("season") or {}
+    return MatchInfo(
+        match_id=str(match_id),
+        date=date,
+        home=home,
+        away=away,
+        competition=CompetitionSeason(
+            competition_id=native_id(competition.get("competition_id"), "competition_id"),
+            competition_name=native_name(competition.get("competition_name"), "competition_name"),
+            season_id=native_id(season.get("season_id"), "season_id"),
+            season_name=native_name(season.get("season_name"), "season_name"),
+        ),
+    )
 
 
 def _starting_position(player: dict) -> str | None:

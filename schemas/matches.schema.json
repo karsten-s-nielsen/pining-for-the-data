@@ -1,5 +1,28 @@
 {
   "$defs": {
+    "ArtifactMeta": {
+      "description": "Content identity of one stored artifact object: the bytes as stored in S3 (ADR 0013).",
+      "properties": {
+        "sha256": {
+          "description": "Lowercase hex SHA-256 of the stored bytes",
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "description": "Size of the stored object in bytes",
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sha256",
+        "size"
+      ],
+      "title": "ArtifactMeta",
+      "type": "object"
+    },
     "_SourceMeta": {
       "description": "Provenance metadata for an upstream data source.",
       "properties": {
@@ -125,6 +148,80 @@
       "default": null,
       "description": "Artifact-format generation. Absent = legacy layout; 2 = canonical Parquet/zstd set.",
       "title": "Format Version"
+    },
+    "competition_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Provider's competition id, verbatim",
+      "title": "Competition Id"
+    },
+    "competition_name": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Provider's competition name",
+      "title": "Competition Name"
+    },
+    "season_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Provider's season id, verbatim; absent when the source gives no season id",
+      "title": "Season Id"
+    },
+    "season_name": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Provider's season value, verbatim",
+      "title": "Season Name"
+    },
+    "artifact_meta": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/ArtifactMeta"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Per-artifact content identity of the stored objects. Keys equal the `artifacts` keys.",
+      "title": "Artifact Meta"
     }
   },
   "required": [

@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-27
+
+### Added
+- **Competition and season fields on every match entry** — `competition_id`, `competition_name`, `season_id` and `season_name`, for all four providers and both tiers. Each value comes verbatim from the match's own metadata artifact, in the role the source gives it. A value the source does not give is absent; nothing is inferred (ADR 0010). Ids are strings (an integer source id becomes its decimal string). Gradient Sports gives a season value but no season id, so its entries carry `season_name` (for example `"2022"`) and no `season_id`.
+- **Artifact content identity** — every match entry carries `artifact_meta: {<artifact key>: {"sha256", "size"}}`, the SHA-256 and size of the object bytes as stored and served. Its keys equal the `artifacts` keys. **Clients should compare artifact sha256 before downloading**: an unchanged `sha256` means the stored copy is current.
+- `pining-upload` flags `--competition-id`, `--competition-name`, `--season-id` and `--season-name`; the 8 loaders pass the values from their readers. New pure reader `formats/gradientsports.py`, shared value rules in `formats/competition_season.py`, and the provider dispatch `formats/provider_metadata.py`.
+- `scripts/backfill_match_competition_and_artifact_meta.py` — one-shot, two-pass backfill of the new fields and `artifact_meta` on every live entry (pass 1 reads, checks and hashes everything and writes nothing; any per-entry error stops the run; pass 2 writes each index with `IfMatch`). `scripts/verify_match_index_fields.py` — cross-provider live verify through the API (fields against the metadata artifact, key sets, sizes by Range GET, optional `--full-hash`).
+- ADR 0013 — entry change contract and artifact content identity.
+
+### Changed
+- **The `updated_at` contract** — `updated_at` now changes only when the record changes: any entry field, or the `sha256` of any artifact. A byte-identical re-upload no longer changes it. The same contract applies to player records. Clients can keep polling with `updatedSince`.
+- `upload_game` now builds and validates the entry, including the artifact hashes, before its first S3 write, so a refused value leaves the stored objects and the index unchanged.
+- **Reproducible gzip staging** — both `_gzip_file` functions write a fixed gzip header (`mtime` 0, no file name), so a loader stages byte-identical files from the same source. One-time effect: the stored StatsBomb `.json.gz` artifacts carry their old upload time in the header, so the first re-upload of each such match after this change stores new bytes and changes its hash and `updated_at` once.
+- `scripts/backfill_skillcorner_opendata_lfs.py` now also updates `artifact_meta` and `updated_at` for each object it replaces, in one `IfMatch` write of `matches.json`, and exits 1 on a conflict. `scripts/migrate_skillcorner_tracking_parquet.py` refuses to convert an entry that carries `artifact_meta`.
+- Test count: 458 → 645 (+187 tests: the value rules, the model and schema, streamed hashing and the change contract, `upload_game` and `upload_players`, every reader, reproducible gzip, the 8 loaders (values passed, stage twice, the three rewired SkillCorner `main()` loops), the LFS repair and migration guard, the two-pass backfill, the verify comparison logic, and the list-equals-metadata contract through the `list_matches` handler; wholly invented fixtures only).
+
 ## [0.8.1] - 2026-09-23
 
 ### Fixed
@@ -170,7 +186,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ARCHITECTURE.md with C4 diagrams
 - CI pipeline (ruff, pyright, pytest) via GitHub Actions
 
-[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.8.1...v0.9.0
+[0.8.1]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.4.0...v0.5.0

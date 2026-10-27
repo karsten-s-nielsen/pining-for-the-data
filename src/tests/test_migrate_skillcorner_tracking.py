@@ -155,3 +155,30 @@ def test_rerun_sweeps_orphaned_legacy(mig):
     mig.migrate_match(s3, "b", "1001", dry_run=False)  # re-run must sweep them
     assert "skillcorner/_private/1001/tracking.json.gz" not in s3.store
     assert "skillcorner/_private/1001/freeze_frames.parquet" not in s3.store
+
+
+def _add_artifact_meta(s3: FakeS3, mid: str) -> None:
+    idx = json.loads(s3.store["skillcorner/matches.json"])
+    entry = idx["matches"][0]
+    entry["artifact_meta"] = {k: {"sha256": "0" * 64, "size": 0} for k in entry["artifacts"]}
+    s3.store["skillcorner/matches.json"] = json.dumps(idx).encode()
+
+
+def test_conversion_refuses_entry_with_artifact_meta(mig):
+    s3 = FakeS3()
+    _seed_rm_match(s3, "1001")
+    _add_artifact_meta(s3, "1001")
+    before = dict(s3.store)
+    with pytest.raises(ValueError, match="1001"):
+        mig.migrate_match(s3, "b", "1001", dry_run=False)
+    assert s3.store == before  # nothing converted, nothing deleted
+
+
+def test_format_version_2_sweep_still_runs_with_artifact_meta(mig):
+    s3 = FakeS3()
+    _seed_rm_match(s3, "1001")
+    mig.migrate_match(s3, "b", "1001", dry_run=False)  # now format_version 2
+    _add_artifact_meta(s3, "1001")
+    s3.store["skillcorner/_private/1001/tracking.json.gz"] = b"orphan"
+    mig.migrate_match(s3, "b", "1001", dry_run=False)
+    assert "skillcorner/_private/1001/tracking.json.gz" not in s3.store

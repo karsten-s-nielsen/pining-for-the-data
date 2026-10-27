@@ -36,6 +36,7 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
 from formats.skillcorner_opendata import (  # noqa: E402
+    OpenDataMatchInfo,
     discover_match_ids,
     is_lfs_pointer,
     match_info,
@@ -135,6 +136,29 @@ def private_player_ids(s3, bucket: str) -> set[str]:
     return {p.get("id") for p in data.get("players", []) if p.get("id") is not None}
 
 
+def upload_match(fetch: Callable[[str], bytes], match_id: str, info: OpenDataMatchInfo, bucket: str) -> None:
+    """Stage one opendata match and upload it to the public tier (``fetch`` injected so tests avoid network)."""
+    from mock_api.upload import upload_game
+
+    with tempfile.TemporaryDirectory(prefix=f"sc-od-{match_id}-") as tmp:
+        staging = stage_match(fetch, Path(tmp), match_id)
+        upload_game(
+            game_dir=staging,
+            provider=PROVIDER,
+            game_id=info.match_id,
+            bucket=bucket,
+            visibility="public",
+            provenance="redistributed",
+            date=info.date,
+            home=info.home,
+            away=info.away,
+            source_name=SOURCE_NAME,
+            source_url=SOURCE_URL,
+            source_licence=SOURCE_LICENCE,
+            **info.competition.as_kwargs(),
+        )
+
+
 def main() -> None:
     # Emit UTF-8 so logging a non-ASCII team/player name never crashes on a legacy console codepage.
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
@@ -142,7 +166,6 @@ def main() -> None:
     import boto3
     from upload_skillcorner_realmadrid import derive_players  # dedup + skip-ids (reused)
 
-    from mock_api.upload import upload_game
     from mock_api.upload_players import upload_players
 
     ap = argparse.ArgumentParser(description="Ingest public SkillCorner Open Data into the public tier")
@@ -189,22 +212,7 @@ def main() -> None:
     uploaded = 0
     for mid in new_ids:
         info = match_info(metas[mid])
-        with tempfile.TemporaryDirectory(prefix=f"sc-od-{mid}-") as tmp:
-            staging = stage_match(fetch_resolved, Path(tmp), mid)
-            upload_game(
-                game_dir=staging,
-                provider=PROVIDER,
-                game_id=info.match_id,
-                bucket=args.bucket,
-                visibility="public",
-                provenance="redistributed",
-                date=info.date,
-                home=info.home,
-                away=info.away,
-                source_name=SOURCE_NAME,
-                source_url=SOURCE_URL,
-                source_licence=SOURCE_LICENCE,
-            )
+        upload_match(fetch_resolved, mid, info, args.bucket)
         uploaded += 1
 
     if players:

@@ -317,3 +317,71 @@ class TestSourceLicenseAlias:
         )
         upload_players_mod.main()
         assert captured["source_licence"] == "American License"
+
+
+_OLD_TS = "2001-01-01T00:00:00Z"
+_ALPHA_STORED = {
+    "id": "test-001",
+    "firstName": "Test",
+    "lastName": "Alpha",
+    "nickname": "Test Alpha",
+    "dob": "2000-01-01",
+    "height": 180.0,
+    "positionGroupType": "D",
+    "visibility": "private",
+    "updated_at": _OLD_TS,
+}
+
+
+def _private_s3(stored: list[dict]) -> MagicMock:
+    s3 = MagicMock()
+    s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+    body = json.dumps({"provider": "gradientsports", "players": stored}).encode()
+
+    def get_obj(Bucket, Key):
+        if Key == "gradientsports/_private/players.json":
+            return {"Body": MagicMock(read=MagicMock(return_value=body))}
+        raise s3.exceptions.NoSuchKey()
+
+    s3.get_object.side_effect = get_obj
+    return s3
+
+
+def _written_players(s3: MagicMock) -> dict[str, dict]:
+    put = next(c for c in s3.put_object.call_args_list if c.kwargs["Key"] == "gradientsports/_private/players.json")
+    return {p["id"]: p for p in json.loads(put.kwargs["Body"].decode("utf-8"))["players"]}
+
+
+class TestPlayersUpdatedAtContract:
+    """D8: updated_at changes only when the player record changes (ADR 0013)."""
+
+    def test_noop_reupload_keeps_player_updated_at(self, tmp_path):
+        from mock_api.upload_players import upload_players
+
+        s3 = _private_s3([_ALPHA_STORED])
+        with patch("mock_api.upload_players.boto3.client", return_value=s3):
+            upload_players(_canonical_json_path(tmp_path), provider="gradientsports", bucket="b", visibility="private")
+
+        assert _written_players(s3)["test-001"]["updated_at"] == _OLD_TS
+
+    def test_changed_player_gets_new_updated_at(self, tmp_path):
+        from mock_api.upload_players import upload_players
+
+        s3 = _private_s3([{**_ALPHA_STORED, "height": 179.0}])
+        with patch("mock_api.upload_players.boto3.client", return_value=s3):
+            upload_players(_canonical_json_path(tmp_path), provider="gradientsports", bucket="b", visibility="private")
+
+        alpha = _written_players(s3)["test-001"]
+        assert alpha["height"] == 180.0
+        assert alpha["updated_at"] != _OLD_TS
+
+    def test_new_player_gets_new_updated_at(self, tmp_path):
+        from mock_api.upload_players import upload_players
+
+        s3 = _private_s3([_ALPHA_STORED])
+        with patch("mock_api.upload_players.boto3.client", return_value=s3):
+            upload_players(_canonical_json_path(tmp_path), provider="gradientsports", bucket="b", visibility="private")
+
+        beta = _written_players(s3)["test-002"]
+        assert beta["updated_at"].endswith("Z")
+        assert beta["updated_at"] != _OLD_TS

@@ -83,6 +83,12 @@ def migrate_match(s3, bucket: str, match_id: str, *, dry_run: bool) -> str:
                 _delete(s3, bucket, f"{pref}/{legacy}")
         return f"{match_id}: already canonical (orphans swept)"
 
+    if entry.get("artifact_meta") is not None:
+        # Such an entry can only come from a new legacy-layout upload. Converting it here would leave
+        # artifact_meta describing objects this branch replaces or deletes (ADR 0013); the canonical
+        # loaders are the path for it.
+        raise ValueError(f"{match_id}: refusing to convert an entry that carries artifact_meta")
+
     frames = json.loads(gzip.decompress(_get(s3, bucket, f"{pref}/tracking.json.gz")))
     tracking_parquet = tracking_to_parquet(frames)
     if not frames_equivalent(frames, parquet_to_tracking(tracking_parquet)):  # transform gate

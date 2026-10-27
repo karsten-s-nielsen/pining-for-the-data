@@ -29,7 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
-from formats.skillcorner_bundle import match_info, parquet_role_files, partition_ingestible  # noqa: E402
+from formats.skillcorner_bundle import MatchInfo, match_info, parquet_role_files, partition_ingestible  # noqa: E402
 from formats.skillcorner_canonical import (  # noqa: E402
     events_parquet_to_parquet,
     recompress_parquet_zstd,
@@ -65,6 +65,35 @@ def ingest_match(
     return dest
 
 
+def upload_match(
+    fetch: Callable[[str], bytes],
+    match_id: str,
+    info: MatchInfo,
+    physical_bytes: bytes | None,
+    bucket: str,
+) -> None:
+    """Stage one parquet-family match canonically and upload it (``fetch`` injected so tests avoid HF/network)."""
+    from mock_api.upload import upload_game
+
+    with tempfile.TemporaryDirectory(prefix=f"sc-pq-{match_id}-") as tmp:
+        staging = ingest_match(fetch, Path(tmp), match_id, physical_bytes=physical_bytes)
+        upload_game(
+            game_dir=staging,
+            provider=PROVIDER,
+            game_id=info.match_id,
+            bucket=bucket,
+            visibility="private",
+            provenance="original",
+            date=info.date,
+            home=info.home,
+            away=info.away,
+            source_name=SOURCE_NAME,
+            source_licence=SOURCE_LICENCE,
+            format_version=2,
+            **info.competition.as_kwargs(),
+        )
+
+
 def main() -> None:
     # Emit UTF-8 so logging a non-ASCII team name never crashes on a legacy console codepage
     # (cp1252 cannot encode characters such as 'ğ') — see the raw-family adapter for the trigger.
@@ -74,7 +103,6 @@ def main() -> None:
     from huggingface_hub import HfApi, hf_hub_download  # local import: only needed for the live ingest
     from upload_skillcorner_realmadrid import derive_players, public_player_ids
 
-    from mock_api.upload import upload_game
     from mock_api.upload_players import upload_players
 
     ap = argparse.ArgumentParser(
@@ -135,22 +163,7 @@ def main() -> None:
         physical_bytes = None
         if physical_available and role_size(match_id, "physical") is not None:
             physical_bytes = hf_get(parquet_role_files(match_id)["physical"])
-        with tempfile.TemporaryDirectory(prefix=f"sc-pq-{match_id}-") as tmp:
-            staging = ingest_match(hf_get, Path(tmp), match_id, physical_bytes=physical_bytes)
-            upload_game(
-                game_dir=staging,
-                provider=PROVIDER,
-                game_id=info.match_id,
-                bucket=args.bucket,
-                visibility="private",
-                provenance="original",
-                date=info.date,
-                home=info.home,
-                away=info.away,
-                source_name=SOURCE_NAME,
-                source_licence=SOURCE_LICENCE,
-                format_version=2,
-            )
+        upload_match(hf_get, match_id, info, physical_bytes, args.bucket)
         uploaded += 1
 
     if args.apply and metas:

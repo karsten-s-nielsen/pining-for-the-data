@@ -11,11 +11,13 @@ are never parsed here.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from zoneinfo import ZoneInfo
+
+from formats.competition_season import CompetitionSeason, native_id, native_name
 
 # figshare `name` fields carry hyphenated DFL ids, e.g. DFL-MAT-J03WN1.
 _MATCH_ID_RE = re.compile(r"DFL-MAT-[A-Z0-9]+")
@@ -41,6 +43,7 @@ class MatchInfo:
     date: str  # YYYY-MM-DD, local (Europe/Berlin) match date
     home: str
     away: str
+    competition: CompetitionSeason = field(default_factory=CompetitionSeason)
 
 
 def match_id_from_filename(filename: str) -> str | None:
@@ -91,23 +94,41 @@ def local_match_date(kickoff: str) -> str:
 
 
 def read_match_information(path: Path) -> MatchInfo:
-    """Parse a DFL matchinformation XML into index metadata.
+    """Parse a DFL matchinformation XML file into index metadata."""
+    # S314: input is the operator-fetched, md5-pinned figshare matchinformation file
+    # (trusted CC-BY source), parsed only in ops tooling/tests — never user input.
+    return parse_match_information(ET.parse(path).getroot(), str(path))  # noqa: S314
+
+
+def read_match_information_bytes(data: bytes) -> MatchInfo:
+    """Parse matchinformation XML bytes (e.g. a stored S3 object) into index metadata."""
+    # S314: the bytes are the same trusted matchinformation artifact, read back from our own bucket.
+    return parse_match_information(ET.fromstring(data))  # noqa: S314
+
+
+def parse_match_information(root: ET.Element, source: str = "<bytes>") -> MatchInfo:
+    """Derive index metadata from a parsed matchinformation document.
 
     Schema (namespace-free): PutDataRequest > MatchInformation > General, with
     attributes MatchId, KickoffTime (tz-aware) / PlannedKickoffTime fallback,
-    HomeTeamName, GuestTeamName.
+    HomeTeamName, GuestTeamName, and the competition/season identity
+    CompetitionId, CompetitionName, SeasonId, Season (spec §5.2).
     """
-    # S314: input is the operator-fetched, md5-pinned figshare matchinformation file
-    # (trusted CC-BY source), parsed only in ops tooling/tests — never user input.
-    general = ET.parse(path).getroot().find("./MatchInformation/General")  # noqa: S314
+    general = root.find("./MatchInformation/General")
     if general is None:
-        raise ValueError(f"{path}: no MatchInformation/General element")
+        raise ValueError(f"{source}: no MatchInformation/General element")
 
     match_id = general.get("MatchId")
     home = general.get("HomeTeamName")
     away = general.get("GuestTeamName")
     kickoff = general.get("KickoffTime") or general.get("PlannedKickoffTime")
     if not (match_id and home and away and kickoff):
-        raise ValueError(f"{path}: missing required General attributes")
+        raise ValueError(f"{source}: missing required General attributes")
 
-    return MatchInfo(match_id=match_id, date=local_match_date(kickoff), home=home, away=away)
+    competition = CompetitionSeason(
+        competition_id=native_id(general.get("CompetitionId"), "competition_id"),
+        competition_name=native_name(general.get("CompetitionName"), "competition_name"),
+        season_id=native_id(general.get("SeasonId"), "season_id"),
+        season_name=native_name(general.get("Season"), "season_name"),
+    )
+    return MatchInfo(match_id=match_id, date=local_match_date(kickoff), home=home, away=away, competition=competition)

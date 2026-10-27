@@ -15,7 +15,10 @@ from pathlib import Path
 import boto3
 
 from canonical.models import MatchEntry
+from formats.competition_season import native_id, native_name
 from mock_api._cli_common import handle_cli_errors, utc_now_iso, validate_param
+from mock_api.artifact_meta import artifact_name, staged_artifact_meta, staged_files
+from mock_api.index_records import carry_updated_at
 
 
 def upload_game(
@@ -32,8 +35,15 @@ def upload_game(
     source_url: str | None = None,
     source_licence: str | None = None,
     format_version: int | None = None,
+    competition_id: str | None = None,
+    competition_name: str | None = None,
+    season_id: str | None = None,
+    season_name: str | None = None,
 ) -> list[str]:
     """Upload all files in game_dir to S3 and update indexes.
+
+    The entry is built and validated BEFORE any S3 write, so a refused value leaves the stored
+    objects and the index unchanged. ``updated_at`` changes only when the entry changes (ADR 0013).
 
     Parameters
     ----------
@@ -65,6 +75,11 @@ def upload_game(
         Licence of the original data source. British spelling canonical;
         ``--source-license`` is accepted as a quiet alias by the argparse layer
         (see ``main()``) and forwarded into this parameter.
+    format_version : int | None
+        Artifact-format generation to record (e.g. 2 for the canonical Parquet/zstd set).
+    competition_id, competition_name, season_id, season_name : str | None
+        Competition/season identity, verbatim from the match's own metadata artifact. ``None``
+        or ``""`` means the source gives no value; the field is then absent from the entry.
 
     Returns
     -------
@@ -77,42 +92,50 @@ def upload_game(
     validate_param(provider, "provider")
     validate_param(game_id, "game_id")
 
+    # 1. Build artifacts as {name: filename} object form (spec §4.1), hash the staged bytes, and
+    #    build and validate the canonical entry before any S3 write.
+    files = staged_files(game_dir)
+    artifacts = {artifact_name(p.name): p.name for p in files}
+    entry: dict | None = None
+    if files:
+        entry = _build_match_entry(
+            game_id,
+            artifacts,
+            visibility,
+            date,
+            home,
+            away,
+            provenance,
+            source_name,
+            source_url,
+            source_licence,
+            format_version,
+            competition={
+                "competition_id": native_id(competition_id, "competition_id"),
+                "competition_name": native_name(competition_name, "competition_name"),
+                "season_id": native_id(season_id, "season_id"),
+                "season_name": native_name(season_name, "season_name"),
+            },
+            artifact_meta=staged_artifact_meta(game_dir),
+        )
+
     s3 = boto3.client("s3")
 
-    # Reject tier mixing: a re-upload cannot flip an existing match's tier.
+    # 2. Reject tier mixing: a re-upload cannot flip an existing match's tier.
     _check_no_tier_mixing(s3, bucket, provider, game_id, visibility)
 
-    prefix = f"{provider}/_private/{game_id}" if visibility == "private" else f"{provider}/{game_id}"
-
-    # Build artifacts as {name: filename} object form (spec §4.1).
-    artifacts: dict[str, str] = {}
-    for file_path in sorted(game_dir.iterdir()):
-        if file_path.is_file() and not file_path.name.startswith("."):
-            key = f"{prefix}/{file_path.name}"
-            s3.upload_file(str(file_path), bucket, key)
-            # Strip ALL extensions so tracking.jsonl.bz2 -> tracking.
-            artifact_name = file_path.name.split(".", 1)[0]
-            artifacts[artifact_name] = file_path.name
-            print(f"  Uploaded {file_path.name} -> s3://{bucket}/{key}")
-
-    if not artifacts:
+    if entry is None:
         print(f"  No files found in {game_dir}")
         return list(artifacts)
 
-    # Build and validate the canonical entry BEFORE any S3 index write.
-    entry = _build_match_entry(
-        game_id,
-        artifacts,
-        visibility,
-        date,
-        home,
-        away,
-        provenance,
-        source_name,
-        source_url,
-        source_licence,
-        format_version,
-    )
+    # 3. Upload the objects.
+    prefix = f"{provider}/_private/{game_id}" if visibility == "private" else f"{provider}/{game_id}"
+    for file_path in files:
+        key = f"{prefix}/{file_path.name}"
+        s3.upload_file(str(file_path), bucket, key)
+        print(f"  Uploaded {file_path.name} -> s3://{bucket}/{key}")
+
+    # 4. Write the index; an unchanged entry keeps its stored updated_at.
     _update_matches_json(s3, bucket, provider, entry)
     _update_providers_json(s3, bucket, provider)
 
@@ -131,6 +154,8 @@ def _build_match_entry(
     source_url: str | None,
     source_licence: str | None,
     format_version: int | None,
+    competition: dict[str, str | None],
+    artifact_meta: dict[str, dict[str, str | int]],
 ) -> dict:
     """Assemble and Pydantic-validate a MatchEntry. Raises on validation error."""
     payload: dict = {
@@ -155,6 +180,9 @@ def _build_match_entry(
             "url": source_url or "",
             "licence": source_licence or "",
         }
+    # Absent values stay absent (ADR 0010): only a value the source gives is written.
+    payload.update({k: v for k, v in competition.items() if v is not None})
+    payload["artifact_meta"] = artifact_meta
     # Validation will raise pydantic.ValidationError before any S3 write.
     return MatchEntry.model_validate(payload).model_dump(exclude_none=True)
 
@@ -184,7 +212,8 @@ def _check_no_tier_mixing(s3, bucket: str, provider: str, game_id: str, new_visi
 def _update_matches_json(s3, bucket: str, provider: str, entry: dict) -> None:
     """Read-modify-write the matches.json index for a provider.
 
-    `entry` MUST already be a validated MatchEntry dict (see _build_match_entry).
+    `entry` MUST already be a validated MatchEntry dict (see _build_match_entry). When the stored
+    entry equals `entry` apart from `updated_at`, the stored `updated_at` is kept (ADR 0013).
     """
     key = f"{provider}/matches.json"
 
@@ -198,7 +227,7 @@ def _update_matches_json(s3, bucket: str, provider: str, entry: dict) -> None:
     existing = next((m for m in data["matches"] if m["id"] == game_id), None)
     if existing:
         idx = data["matches"].index(existing)
-        data["matches"][idx] = entry
+        data["matches"][idx] = carry_updated_at(entry, existing)
     else:
         data["matches"].append(entry)
 
@@ -279,6 +308,12 @@ def main() -> None:
         default=None,
         help="Artifact-format generation to record (e.g. 2 for the canonical Parquet/zstd set)",
     )
+    # Competition/season identity, verbatim from the match's own metadata (ADR 0013). Omit a flag
+    # when the source gives no value; never infer one.
+    parser.add_argument("--competition-id", default=None, help="Provider's competition id, verbatim")
+    parser.add_argument("--competition-name", default=None, help="Provider's competition name, verbatim")
+    parser.add_argument("--season-id", default=None, help="Provider's season id, verbatim")
+    parser.add_argument("--season-name", default=None, help="Provider's season value, verbatim")
     args = parser.parse_args()
 
     if not args.bucket:
@@ -304,5 +339,9 @@ def main() -> None:
         source_url=args.source_url,
         source_licence=args.source_licence,
         format_version=args.format_version,
+        competition_id=args.competition_id,
+        competition_name=args.competition_name,
+        season_id=args.season_id,
+        season_name=args.season_name,
     )
     print(f"Done — {len(artifacts)} artifact(s) uploaded.")

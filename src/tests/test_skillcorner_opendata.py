@@ -142,3 +142,28 @@ class TestPublicOpendataIds:
             {"id": "9999", "visibility": "public", "artifacts": {"9999_match": "m.json"}},
         ]
         assert public_opendata_ids(matches) == ["1874553", "1959846"]
+
+
+# --- competition/season identity (spec §5.2) -------------------------------------------------
+
+
+def _competition_meta() -> dict:
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).parent / "fixtures" / "skillcorner_v3_meta_competition_synthetic.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_opendata_match_info_competition():
+    from formats.competition_season import CompetitionSeason
+
+    info = match_info(_competition_meta())
+    assert info.match_id == "9000002"
+    assert info.competition == CompetitionSeason("301", "Synthetic Premier", "701", "2099/2100")
+
+
+def test_opendata_missing_source_value_gives_absent_field():
+    meta = _competition_meta()
+    del meta["competition_edition"]["season"]["name"]
+    assert match_info(meta).competition.season_name is None

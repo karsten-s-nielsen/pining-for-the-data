@@ -612,3 +612,26 @@ class TestReadBundle:
         root = sb_bundle_dir(overrides={"events.json": ["a", "b"]})
         with pytest.raises(ValueError, match=r"events\.json\[0\] is a str, expected a JSON object"):
             sb.read_bundle(root)
+
+
+# --- competition/season identity (spec §5.2, §5.3) -------------------------------------------
+
+
+def test_statsbomb_match_info_competition(sbo_match):
+    from formats.competition_season import CompetitionSeason
+
+    info = sb.match_info(sbo_match)
+    assert info.competition == CompetitionSeason("555555", "Continental Cup", "777", "2026")
+
+
+def test_statsbomb_float_competition_id_refused(sbo_match):
+    meta = {**sbo_match, "competition": {**sbo_match["competition"], "competition_id": 49.0}}
+    with pytest.raises(ValueError, match="competition_id"):
+        sb.match_info(meta)
+
+
+def test_statsbomb_missing_source_value_gives_absent_field(sbo_match):
+    meta = {**sbo_match, "season": {"season_id": 777}}
+    info = sb.match_info(meta)
+    assert info.competition.season_name is None
+    assert info.competition.season_id == "777"

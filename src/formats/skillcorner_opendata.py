@@ -19,7 +19,9 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from formats.competition_season import CompetitionSeason, skillcorner_v3_competition_season
 
 # (role, filename-suffix) for the four opendata files per match. The staged filename keeps the
 # id-prefixed opendata basename so ``upload_game`` derives the exact legacy artifact keys
@@ -42,6 +44,7 @@ class OpenDataMatchInfo:
     date: str  # UTC calendar date (date_time[:10]) — matches the existing public entries
     home: str
     away: str
+    competition: CompetitionSeason = field(default_factory=CompetitionSeason)
 
 
 def opendata_files(match_id: str) -> dict[str, str]:
@@ -86,7 +89,13 @@ def match_info(meta: dict) -> OpenDataMatchInfo:
         raise ValueError("missing required meta fields (need id, date_time, home_team, away_team)")
     if "T" not in date_time or len(date_time) < 10:
         raise ValueError(f"unexpected date_time format: {date_time!r}")
-    return OpenDataMatchInfo(match_id=str(match_id), date=date_time[:10], home=home, away=away)
+    return OpenDataMatchInfo(
+        match_id=str(match_id),
+        date=date_time[:10],
+        home=home,
+        away=away,
+        competition=skillcorner_v3_competition_season(meta),
+    )
 
 
 # --- Git-LFS resolution helpers -------------------------------------------------------------------

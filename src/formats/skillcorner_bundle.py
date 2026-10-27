@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+from formats.competition_season import CompetitionSeason, skillcorner_v3_competition_season
 
 _MADRID = ZoneInfo("Europe/Madrid")
 
@@ -37,6 +39,7 @@ class MatchInfo:
     date: str  # YYYY-MM-DD, local (Europe/Madrid) match date
     home: str
     away: str
+    competition: CompetitionSeason = field(default_factory=CompetitionSeason)
 
 
 def local_match_date(timestamp: str) -> str:
@@ -66,7 +69,13 @@ def match_info(meta: dict) -> MatchInfo:
     timestamp = meta.get("date_time")
     if match_id is None or not home or not away or not timestamp:
         raise ValueError("missing required meta fields (need id, date_time, home_team, away_team)")
-    return MatchInfo(match_id=str(match_id), date=local_match_date(timestamp), home=home, away=away)
+    return MatchInfo(
+        match_id=str(match_id),
+        date=local_match_date(timestamp),
+        home=home,
+        away=away,
+        competition=skillcorner_v3_competition_season(meta),
+    )
 
 
 def load_meta(path: Path) -> dict:

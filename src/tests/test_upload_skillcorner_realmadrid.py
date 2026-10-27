@@ -192,3 +192,33 @@ class TestUploadAll:
 
         uploaded, _n_players, _n_skipped = mod.upload_all(tmp_path, "test-bucket", limit=2)
         assert uploaded == 2
+
+
+class TestReproducibleGzip:
+    """Spec §5.8: the RM `_gzip_file` writes a fixed header (mtime 0, no file name)."""
+
+    def test_gzip_header_fixed(self, tmp_path: Path, load_script) -> None:
+        import gzip
+
+        mod = load_script("upload_skillcorner_realmadrid")
+        src = tmp_path / "tracking.json"
+        src.write_bytes(b'[{"frame": 1}]')
+        dest = tmp_path / "tracking.json.gz"
+        mod._gzip_file(src, dest)
+        data = dest.read_bytes()
+        assert data[4:8] == b"\x00\x00\x00\x00"
+        assert data[3] & 0x08 == 0
+        assert gzip.decompress(data) == b'[{"frame": 1}]'
+
+    def test_gzip_twice_identical(self, tmp_path: Path, load_script, monkeypatch) -> None:
+        import time
+
+        mod = load_script("upload_skillcorner_realmadrid")
+        src = tmp_path / "tracking.json"
+        src.write_bytes(b'[{"frame": 1}]')
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        mod._gzip_file(src, tmp_path / "a" / "tracking.json.gz")
+        monkeypatch.setattr(time, "time", lambda: 4102444800.0)
+        mod._gzip_file(src, tmp_path / "b" / "tracking.json.gz")
+        assert (tmp_path / "a" / "tracking.json.gz").read_bytes() == (tmp_path / "b" / "tracking.json.gz").read_bytes()

@@ -40,6 +40,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
+from formats.gradientsports import match_info  # noqa: E402
 from mock_api.upload import upload_game  # noqa: E402
 from mock_api.upload_players import upload_players  # noqa: E402
 
@@ -139,14 +140,10 @@ def _upload_one_match(source_dir: Path, match_id: str, bucket: str) -> None:
         if not required.is_file():
             raise FileNotFoundError(f"Match {match_id}: expected file missing: {required}")
 
-    metadata_obj = json.loads(metadata_path.read_text(encoding="utf-8"))
-    if isinstance(metadata_obj, list):
-        # Gradient Sports wraps the metadata in a single-element list
-        metadata_obj = metadata_obj[0] if metadata_obj else {}
-
-    date = metadata_obj.get("date", "").split("T", 1)[0]
-    home = (metadata_obj.get("homeTeam") or {}).get("name", "")
-    away = (metadata_obj.get("awayTeam") or {}).get("name", "")
+    info = match_info(json.loads(metadata_path.read_text(encoding="utf-8")))
+    # The metadata match id must be the file's own id: a mismatch proves a wrong artifact.
+    if info.match_id != match_id:
+        raise ValueError(f"Match {match_id}: metadata [0].id is {info.match_id!r}, not the file stem {match_id!r}")
 
     with tempfile.TemporaryDirectory(prefix=f"gradientsports-{match_id}-") as tmp:
         staging = Path(tmp)
@@ -161,13 +158,14 @@ def _upload_one_match(source_dir: Path, match_id: str, bucket: str) -> None:
             game_id=match_id,
             bucket=bucket,
             visibility="private",
-            date=date,
-            home=home,
-            away=away,
+            date=info.date,
+            home=info.home,
+            away=info.away,
             provenance="original",
             source_name=SOURCE_NAME,
             source_url=SOURCE_URL,
             source_licence=SOURCE_LICENCE,
+            **info.competition.as_kwargs(),
         )
 
 

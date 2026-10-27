@@ -1,0 +1,10 @@
+[
+  {
+    "id": "990001",
+    "date": "2099-07-01T18:00:00",
+    "homeTeam": {"id": "880001", "name": "Synthetic Rovers"},
+    "awayTeam": {"id": "880002", "name": "Invented Athletic"},
+    "competition": {"id": "77", "name": "Synthetic Cup"},
+    "season": "2099"
+  }
+]

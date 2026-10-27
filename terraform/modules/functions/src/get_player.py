@@ -5,10 +5,10 @@ from __future__ import annotations
 import os
 
 from shared import (
-    Tier,
     get_s3_client,
     json_response,
     logger,
+    policy_for,
     provider_known,
     read_player_index,
     validate_path_param,
@@ -20,10 +20,11 @@ BUCKET = os.environ.get("DATA_BUCKET", "")
 
 def handler(event: dict, context: object) -> dict:
     """Return a single player record. 404 if provider unknown, player not found,
-    or found-but-private-and-public-tier.
+    or found-but-private-and-not-owner-tier.
 
     Spec §6.4: gates on providers.json membership.
     Spec §6.3.1: on cross-tier ID collision, owner-tier sees the private record.
+    The LIST tier behaves like PUBLIC here (ADR 0014).
     """
     tier = validate_token(event)
     if isinstance(tier, dict):
@@ -46,7 +47,7 @@ def handler(event: dict, context: object) -> dict:
 
     # Owner tier: try PRIVATE index first so a cross-tier ID collision returns
     # the private record (spec §6.3.1: private wins).
-    if tier == Tier.OWNER:
+    if policy_for(tier).reads_private_content:
         private_players = read_player_index(s3, BUCKET, f"{provider}/_private/players.json")
         found = next((p for p in private_players if p.get("id") == player_id), None)
         if found is not None:

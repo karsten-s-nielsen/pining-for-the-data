@@ -48,13 +48,14 @@ SkillCorner open data is redistributed as-is (MIT license) — no de-identificat
 - `pining-upload` — upload game artifacts to S3 and update provider indexes (supports `--visibility public|private`)
 - `pining-upload-players` — upload provider-level player reference catalogue (canonical JSON only)
 
-## Mock Provider API: two-tier auth
+## Mock Provider API: three-tier auth
 
 - **Public tier**: documented `api_token` in `terraform.tfvars`. Serves redistributed open data (e.g. SkillCorner A-League).
 - **Owner tier**: bearer token stored in SSM Parameter Store SecureString (`/pining-for-the-data/api_token_owner`); set out-of-band via `aws ssm put-parameter`, never committed. Serves restricted private-tier content. Owner-tier providers: `gradientsports`, `skillcorner` (private), `statsbomb` — see docs/context/formats-and-tiers.md.
-- `validate_token` (in `terraform/modules/functions/src/shared.py`) returns a `Tier` enum (`PUBLIC` or `OWNER`); handlers filter responses by tier.
+- **List tier** (ADR 0014): SSM SecureString `/pining-for-the-data/api_token_list`, for the lakehouse v2 Ops Space. Sees every entry on `/matches`; `404` on every artifact; like `PUBLIC` on player endpoints.
+- `validate_token` (in `terraform/modules/functions/src/shared.py`) returns a `Tier` enum (`PUBLIC`, `LIST` or `OWNER`); handlers ask `policy_for(tier)` and never compare a tier. A placeholder, short or malformed SSM value disables its tier.
 - Tier mismatch returns uniform `404` (not `403`) to avoid existence leaks; duplicate-token misconfiguration classifies as `PUBLIC` (fail closed).
-- Rotation: bump `LAST_ROTATION` env var on all 6 Lambdas via `terraform apply -var=last_rotation=$(date -u +%Y%m%dT%H%M%SZ)` after `aws ssm put-parameter --overwrite`.
+- Rotation: after `aws ssm put-parameter --overwrite`, set the GitHub variable `LAST_ROTATION` and bump `LAST_ROTATION` env var on all 6 Lambdas via `terraform apply -var=last_rotation=<the same value>`.
 - No dual-validity in v1; consumers must implement 401 retry during the rotation window.
 
 Full design: `docs/superpowers/specs/2026-05-02-private-data-tier.md`.

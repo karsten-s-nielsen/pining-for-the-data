@@ -18,6 +18,16 @@ output "owner_token_param_name" {
   value       = aws_ssm_parameter.api_token_owner.name
 }
 
+output "list_token_param_arn" {
+  description = "ARN of the SSM parameter holding the LIST-tier bearer token"
+  value       = aws_ssm_parameter.api_token_list.arn
+}
+
+output "list_token_param_name" {
+  description = "Name of the LIST-tier SSM parameter (used by Lambda env var)"
+  value       = aws_ssm_parameter.api_token_list.name
+}
+
 output "audit_bucket_name" {
   description = "Audit log bucket"
   value       = module.audit.audit_bucket_name

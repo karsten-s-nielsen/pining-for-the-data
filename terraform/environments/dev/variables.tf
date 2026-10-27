@@ -17,7 +17,7 @@ variable "api_token" {
 }
 
 variable "last_rotation" {
-  description = "No-op marker bumped during owner-token rotation to invalidate Lambda warm-container cache (spec §3.5)"
+  description = "No-op marker bumped during owner- or LIST-token rotation to invalidate the Lambda warm-container token caches (spec §3.5)"
   type        = string
   default     = "initial"
 }

@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -33,7 +32,13 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 # scripts/ is not a package — make the sibling helper module importable when run directly.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _verify_http import NoFollow, get_json, parse_content_range_total  # noqa: E402
+from _verify_http import (  # noqa: E402
+    NoFollow,
+    RateLimiter,
+    get_json,
+    parse_content_range_total,
+    with_retry,
+)
 
 from formats.provider_metadata import MetadataIdentity, metadata_artifact_key, read_metadata_identity  # noqa: E402
 from mock_api.artifact_meta import ArtifactDigest, hash_stream  # noqa: E402
@@ -83,42 +88,6 @@ def size_from_range(status: int, content_range: str | None, fetch_full: Callable
             raise ValueError(f"416 on a Range GET, but the object has {len(body)} bytes")
         return 0
     raise ValueError(f"unexpected status {status} for a Range GET")
-
-
-class RateLimiter:
-    """Space calls at least ``1 / max_per_second`` apart."""
-
-    def __init__(
-        self,
-        max_per_second: float = 8.0,
-        *,
-        clock: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], None] = time.sleep,
-    ) -> None:
-        self._interval = 1.0 / max_per_second
-        self._clock = clock
-        self._sleep = sleep
-        self._next: float | None = None
-
-    def wait(self) -> None:
-        now = self._clock()
-        if self._next is not None and now < self._next:
-            self._sleep(self._next - now)
-            now = self._next
-        self._next = now + self._interval
-
-
-def with_retry[T](call: Callable[[], T], *, attempts: int = 5, sleep: Callable[[float], None] = time.sleep) -> T:
-    """Run ``call``; retry an ``HTTPError`` 429 or 5xx with backoff 1, 2, 4, 8 s. Other errors raise."""
-    for attempt in range(attempts):
-        try:
-            return call()
-        except urllib.error.HTTPError as e:
-            retryable = e.code == 429 or 500 <= e.code < 600
-            if not retryable or attempt == attempts - 1:
-                raise
-            sleep(2**attempt)
-    raise AssertionError("unreachable")
 
 
 class _Api:

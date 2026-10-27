@@ -1,6 +1,6 @@
 # Architecture — pining-for-the-data
 
-> **Status**: Mock Provider API implemented with two-tier auth. Four providers served — `skillcorner` (public open data + owner-tier restricted bundle), `idsse` (public), `gradientsports` (owner tier), `statsbomb` (owner tier).
+> **Status**: Mock Provider API implemented with three-tier auth. Four providers served — `skillcorner` (public open data + owner-tier restricted bundle), `idsse` (public), `gradientsports` (owner tier), `statsbomb` (owner tier).
 > **Repository**: [`karsten-s-nielsen/pining-for-the-data`](https://github.com/karsten-s-nielsen/pining-for-the-data)
 
 ---
@@ -36,7 +36,7 @@ Open data, redistributed as-is              Restricted data, owner tier only
       │  (Level 1)       │                    │   (Level 2)      │
       │                  │                    │                  │
       │  load_dataset()  │                    │  GET /v1/matches │
-      │  Open data only  │                    │  Two-tier auth   │
+      │  Open data only  │                    │  Three-tier auth │
       └──────────────────┘                    └──────────────────┘
                 │                                       │
                 └───────────────────┬───────────────────┘
@@ -54,7 +54,7 @@ Open data, redistributed as-is              Restricted data, owner tier only
                        └────────────────────────┘
 ```
 
-Only open data reaches HuggingFace Hub. The mock API serves both: the public bearer token sees open data only, the owner token sees everything.
+Only open data reaches HuggingFace Hub. The mock API serves both: the public bearer token sees open data only, the owner token sees everything, and the list-only token sees every match entry but no artifact (ADR 0014).
 
 **Three modes:**
 - **As-is redistribution** (`skillcorner` open data, `idsse`): validate and publish, no transformation
@@ -128,13 +128,17 @@ Upload CLIs (`upload.py`, `upload_players.py`) for S3 data management. `artifact
 | `GET /v1/{provider}/players` | `list_players` | List player reference records for a provider (provider-gated 404, tier-merged) |
 | `GET /v1/{provider}/players/{id}` | `get_player` | Single player reference record (private-wins precedence on cross-tier collision) |
 
-### 3.5 Two-tier auth + private content
+### 3.5 Three-tier auth + private content
 
 `validate_token` returns a `Tier` enum:
 
 - **`Tier.PUBLIC`** — bearer matches the documented `api_token` in `terraform.tfvars`. Sees only entries with `visibility == "public"` (or missing, treated as public).
 - **`Tier.OWNER`** — bearer matches the SSM Parameter Store SecureString `/pining-for-the-data/api_token_owner` (encrypted with the data bucket's KMS key). Sees all entries.
-- **Duplicate-token misconfiguration** — classified as `Tier.PUBLIC` (fail closed; ADR 0001).
+- **`Tier.LIST`** — bearer matches the SSM Parameter Store SecureString `/pining-for-the-data/api_token_list` (same KMS key). Sees all entries on `/matches`, gets `404` on every artifact, and sees only public player records (ADR 0014). The lakehouse v2 Ops Space holds it.
+- **Duplicate-token misconfiguration** — a token that matches two configured tokens is classified as `Tier.PUBLIC` (fail closed; ADR 0001, ADR 0014).
+- **Unset guard** — a stored owner or LIST value that is the Terraform placeholder, has fewer than 32 characters, or is not one RFC 6750 `b64token` disables its tier. Tokens are compared as UTF-8 bytes, so a non-ASCII token gets `401` (ADR 0014).
+
+Handlers ask `policy_for(tier)` for what a tier may do and never compare a tier value.
 
 Tier mismatch returns uniform `404` (not `403`) to avoid existence leaks. Private-tier content lives under a reserved `_private/` S3 prefix (ADR 0002): `{bucket}/{provider}/_private/{game_id}/...` for matches, `{bucket}/{provider}/_private/players.json` for the players index. Path-param validators reject `_`-prefixed values, making `_private` an unreachable input from API callers.
 
@@ -151,7 +155,7 @@ AWS (effectively $0/month at expected volume)
 │   └── {provider}/_private/ →  Private-tier content (presigned only to owner-token holders)
 ├── S3 audit bucket          →  CloudTrail data events; 365-day retention; SSE-KMS
 ├── KMS CMK                  →  Encrypts both buckets; rotated annually
-├── SSM Parameter Store      →  /pining-for-the-data/api_token_owner (SecureString)
+├── SSM Parameter Store      →  /pining-for-the-data/api_token_owner, /pining-for-the-data/api_token_list (SecureStrings)
 ├── CloudTrail               →  Data events on data bucket; excludes only providers.json reads
 ├── API Gateway (HTTP API)   →  REST endpoints mimicking provider protocol; throttled (10rps/50burst)
 └── Lambda x6                →  list_providers, list_matches, get_artifact, list_players, get_player, health

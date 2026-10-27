@@ -6,10 +6,10 @@ import json
 import os
 
 from shared import (
-    Tier,
     get_s3_client,
     json_response,
     logger,
+    policy_for,
     redirect_response,
     validate_path_param,
     validate_token,
@@ -28,6 +28,9 @@ def handler(event: dict, context: object) -> dict:
     directly. No ``list_objects_v2`` and no ``head_object`` — the index is the
     source of truth for the file's existence (the upload tool wrote both
     atomically). Spec §4.3.
+
+    The LIST tier gets the same uniform 404 on every artifact, before any S3
+    read (ADR 0014).
     """
     tier = validate_token(event)
     if isinstance(tier, dict):
@@ -44,6 +47,12 @@ def handler(event: dict, context: object) -> dict:
         if param_error:
             logger.warning("validation_failure", extra={"handler": "get_artifact", "param": name})
             return param_error
+
+    policy = policy_for(tier)
+    if not policy.serves_artifacts:
+        # LIST tier: list-only. Uniform 404 before any S3 read or presign (ADR 0014).
+        logger.info("list_tier_artifact_denied", extra={"handler": "get_artifact"})
+        return json_response(404, {"error": "Match not found"})
 
     s3 = get_s3_client()
 
@@ -62,7 +71,7 @@ def handler(event: dict, context: object) -> dict:
         return json_response(404, {"error": "Match not found"})
 
     visibility = match.get("visibility", "public")
-    if visibility == "private" and tier != Tier.OWNER:
+    if visibility == "private" and not policy.reads_private_content:
         # Uniform 404 with not-found — no existence leak.
         return json_response(404, {"error": "Match not found"})
 

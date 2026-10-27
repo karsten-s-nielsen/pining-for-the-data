@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
@@ -72,29 +73,98 @@ def _get_ssm_client():
     return _ssm_client
 
 
-@functools.cache
-def _get_owner_token() -> str:
-    """Fetch the owner-tier token from SSM Parameter Store.
+# Unset guard (ADR 0014). Terraform creates each SSM token with this placeholder, and the
+# repo is public, so the placeholder must never work as a token.
+_PLACEHOLDER_TOKEN = "placeholder-set-via-cli-after-first-apply"  # noqa: S105  # pragma: allowlist secret
+_MIN_TOKEN_LENGTH = 32
+_B64TOKEN_RE = re.compile(r"[A-Za-z0-9\-._~+/]+=*")  # RFC 6750 b64token
 
-    Cached for the lifetime of the warm Lambda container. Rotation requires
-    bumping the LAST_ROTATION env var via terraform apply (spec §3.5).
+
+def _usable_token(value: str) -> bool:
+    """True when a stored token may be used: not the placeholder, >= 32 characters, one b64token.
+
+    ``fullmatch`` on purpose: ``re.match`` with ``$`` also accepts a value with a final line break.
     """
-    param_name = os.environ["OWNER_TOKEN_PARAM"]
+    return value != _PLACEHOLDER_TOKEN and len(value) >= _MIN_TOKEN_LENGTH and _B64TOKEN_RE.fullmatch(value) is not None
+
+
+def _fetch_ssm_token(env_var: str) -> str:
+    """Read the SecureString named by ``env_var``. Every failure raises."""
+    param_name = os.environ[env_var]
     response = _get_ssm_client().get_parameter(Name=param_name, WithDecryption=True)
     return response["Parameter"]["Value"]
 
 
+@functools.cache
+def _get_owner_token() -> str | None:
+    """Fetch the owner-tier token from SSM Parameter Store; ``None`` when the stored value is unusable.
+
+    Cached for the lifetime of the warm Lambda container, so the unset warning is
+    logged once per container. Rotation requires bumping the LAST_ROTATION env var
+    via terraform apply (spec §3.5).
+    """
+    value = _fetch_ssm_token("OWNER_TOKEN_PARAM")
+    if not _usable_token(value):
+        logger.warning("owner_token_unset")
+        return None
+    return value
+
+
+@functools.cache
+def _get_list_token() -> str | None:
+    """Fetch the LIST-tier token from SSM Parameter Store; ``None`` when the stored value is unusable.
+
+    Same caching and rotation as ``_get_owner_token``. An exception is not cached,
+    so the next request tries the fetch again.
+    """
+    value = _fetch_ssm_token("LIST_TOKEN_PARAM")
+    if not _usable_token(value):
+        logger.warning("list_token_unset")
+        return None
+    return value
+
+
+def _token_bytes(value: str) -> bytes:
+    """Bytes for ``hmac.compare_digest``. ``surrogatepass`` accepts every Python string, so nothing raises."""
+    return value.encode("utf-8", "surrogatepass")
+
+
 class Tier(StrEnum):
     PUBLIC = "public"
+    LIST = "list"
     OWNER = "owner"
+
+
+@dataclass(frozen=True)
+class TierPolicy:
+    """What a tier may do. Handlers ask this table and never compare a tier value (ADR 0014)."""
+
+    lists_private_matches: bool
+    serves_artifacts: bool
+    reads_private_content: bool
+
+
+_NO_ACCESS = TierPolicy(lists_private_matches=False, serves_artifacts=False, reads_private_content=False)
+
+_TIER_POLICIES: dict[Tier, TierPolicy] = {
+    Tier.PUBLIC: TierPolicy(lists_private_matches=False, serves_artifacts=True, reads_private_content=False),
+    Tier.LIST: TierPolicy(lists_private_matches=True, serves_artifacts=False, reads_private_content=False),
+    Tier.OWNER: TierPolicy(lists_private_matches=True, serves_artifacts=True, reads_private_content=True),
+}
+
+
+def policy_for(tier: Tier) -> TierPolicy:
+    """Return the tier's policy. A tier missing from the table gets no access (fail closed)."""
+    return _TIER_POLICIES.get(tier, _NO_ACCESS)
 
 
 def validate_token(event: dict) -> Tier | dict:
     """Validate bearer token from Authorization header.
 
-    Returns ``Tier.PUBLIC`` or ``Tier.OWNER`` on success, or an error response
-    dict on failure. If both tokens are the same string (operator
-    misconfiguration), classifies as ``PUBLIC`` — fail closed. Spec §3.2.
+    Returns ``Tier.PUBLIC``, ``Tier.LIST`` or ``Tier.OWNER`` on success, or an error
+    response dict on failure. Tokens are compared as bytes, so a non-ASCII token gets
+    401 instead of raising. A token that matches two configured tokens (operator
+    misconfiguration) classifies as ``PUBLIC`` — fail closed (ADR 0001, ADR 0014).
     """
     public_token = os.environ.get("API_TOKEN", "")
     if not public_token:
@@ -106,7 +176,7 @@ def validate_token(event: dict) -> Tier | dict:
     if not auth.startswith("Bearer "):
         return _error_response(401, "Missing or malformed Authorization header")
 
-    presented = auth[7:]
+    presented = _token_bytes(auth[7:])
 
     try:
         owner_token = _get_owner_token()
@@ -114,14 +184,30 @@ def validate_token(event: dict) -> Tier | dict:
         logger.exception("owner_token_fetch_failed")
         return _error_response(500, "Server misconfiguration")
 
-    # Compare against PUBLIC first so a duplicate-token misconfiguration
-    # classifies as PUBLIC (fail closed; spec §3.2). The more restrictive
-    # failure mode: break the owner consumer visibly rather than silently
-    # leak private content to public-token holders.
-    if hmac.compare_digest(presented, public_token):
+    try:
+        list_token = _get_list_token()
+    except Exception:
+        # Isolation (ADR 0014): a LIST-parameter problem disables only the LIST tier.
+        logger.exception("list_token_fetch_failed")
+        list_token = None
+
+    # One comparison per configured token, all done before any branch. A disabled
+    # tier (None) never matches.
+    is_public = hmac.compare_digest(presented, _token_bytes(public_token))
+    is_owner = owner_token is not None and hmac.compare_digest(presented, _token_bytes(owner_token))
+    is_list = list_token is not None and hmac.compare_digest(presented, _token_bytes(list_token))
+
+    if sum((is_public, is_owner, is_list)) >= 2:
+        logger.warning("token_collision")
+    # Any collision classifies as PUBLIC (fail closed; spec §3.2). The more
+    # restrictive failure mode: break the owner or LIST consumer visibly rather
+    # than silently leak private content to public-token holders.
+    if is_public or (is_owner and is_list):
         return Tier.PUBLIC
-    if hmac.compare_digest(presented, owner_token):
+    if is_owner:
         return Tier.OWNER
+    if is_list:
+        return Tier.LIST
     return _error_response(401, "Invalid token")
 
 

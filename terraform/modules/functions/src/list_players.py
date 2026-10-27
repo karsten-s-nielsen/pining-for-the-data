@@ -5,12 +5,12 @@ from __future__ import annotations
 import os
 
 from shared import (
-    Tier,
     apply_filters,
     get_s3_client,
     json_response,
     logger,
     parse_query_filters,
+    policy_for,
     provider_known,
     read_player_index,
     validate_path_param,
@@ -27,7 +27,8 @@ def handler(event: dict, context: object) -> dict:
 
     Gates on providers.json membership for unknown-provider 404 (spec §6.4).
     Owner-tier merge applies private-wins precedence on cross-tier ID
-    collision (spec §6.3.1).
+    collision (spec §6.3.1). The LIST tier sees public records only, like
+    PUBLIC (ADR 0014).
 
     Query filters (spec: 2026-05-07-query-parameter-filtering §3.1):
     Only updatedSince is supported. dateFrom/dateTo return 400.
@@ -52,7 +53,9 @@ def handler(event: dict, context: object) -> dict:
         return json_response(404, {"error": "Provider not found"})
 
     public_players = read_player_index(s3, BUCKET, f"{provider}/players.json")
-    private_players = read_player_index(s3, BUCKET, f"{provider}/_private/players.json") if tier == Tier.OWNER else []
+    # Only OWNER reads private records; LIST behaves like PUBLIC here (ADR 0014).
+    reads_private = policy_for(tier).reads_private_content
+    private_players = read_player_index(s3, BUCKET, f"{provider}/_private/players.json") if reads_private else []
 
     # Private-wins precedence on cross-tier ID collision (spec §6.3.1).
     by_id: dict[str, dict] = {}

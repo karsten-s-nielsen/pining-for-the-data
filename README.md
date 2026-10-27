@@ -69,7 +69,7 @@ REST API mimicking commercial tracking data providers. Bearer token auth, same e
 | GET | `/v1/{provider}/players/{id}` | Single player reference record |
 | GET | `/v1/health` | Health check (unauthenticated) |
 
-**Two-tier auth.** Public-tier content (the redistributed SkillCorner data) is served against the documented public token. Private-tier content (operator-loaded restricted datasets) requires a separate owner-tier token stored in AWS SSM Parameter Store. Tier semantics are uniform 404 on mismatch (no existence leaks). See [`docs/api-reference.md`](docs/api-reference.md) for the full contract; the design rationale lives in [`docs/superpowers/specs/2026-05-02-private-data-tier.md`](docs/superpowers/specs/2026-05-02-private-data-tier.md).
+**Three-tier auth.** Public-tier content (the redistributed SkillCorner data) is served against the documented public token. Private-tier content (operator-loaded restricted datasets) requires a separate owner-tier token stored in AWS SSM Parameter Store. A third, list-only token (also in SSM) sees the private match list but no artifact and no private player record (ADR 0014). Tier semantics are uniform 404 on mismatch (no existence leaks). See [`docs/api-reference.md`](docs/api-reference.md) for the full contract; the design rationale lives in [`docs/superpowers/specs/2026-05-02-private-data-tier.md`](docs/superpowers/specs/2026-05-02-private-data-tier.md).
 
 ```bash
 API_URL="https://your-api-gateway-id.execute-api.us-east-1.amazonaws.com"

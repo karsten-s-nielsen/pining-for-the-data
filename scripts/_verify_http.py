@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import urllib.error
 import urllib.request
+from collections.abc import Callable
 from typing import Any
 
 
@@ -62,3 +65,39 @@ class NoFollow(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+class RateLimiter:
+    """Space calls at least ``1 / max_per_second`` apart."""
+
+    def __init__(
+        self,
+        max_per_second: float = 8.0,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self._interval = 1.0 / max_per_second
+        self._clock = clock
+        self._sleep = sleep
+        self._next: float | None = None
+
+    def wait(self) -> None:
+        now = self._clock()
+        if self._next is not None and now < self._next:
+            self._sleep(self._next - now)
+            now = self._next
+        self._next = now + self._interval
+
+
+def with_retry[T](call: Callable[[], T], *, attempts: int = 5, sleep: Callable[[float], None] = time.sleep) -> T:
+    """Run ``call``; retry an ``HTTPError`` 429 or 5xx with backoff 1, 2, 4, 8 s. Other errors raise."""
+    for attempt in range(attempts):
+        try:
+            return call()
+        except urllib.error.HTTPError as e:
+            retryable = e.code == 429 or 500 <= e.code < 600
+            if not retryable or attempt == attempts - 1:
+                raise
+            sleep(2**attempt)
+    raise AssertionError("unreachable")

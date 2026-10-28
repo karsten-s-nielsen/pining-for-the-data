@@ -50,8 +50,11 @@ PROVIDER = "skillcorner"
 SOURCE_NAME = "SkillCorner Open Data"
 SOURCE_URL = "https://github.com/SkillCorner/opendata"
 SOURCE_LICENCE = "MIT"
-RAW_BASE = "https://raw.githubusercontent.com/SkillCorner/opendata/master/data"
-MEDIA_BASE = "https://media.githubusercontent.com/media/SkillCorner/opendata/master/data"
+# Pinned upstream commit (ADR 0015): the redistribution is reproducible and the commit is
+# recorded in each entry's source.revision. Move the pin deliberately, never to a moving ref.
+UPSTREAM_COMMIT = "4340d274572876239c154c90bc507a9b3250a656"  # pragma: allowlist secret (public git SHA)
+RAW_BASE = f"https://raw.githubusercontent.com/SkillCorner/opendata/{UPSTREAM_COMMIT}/data"
+MEDIA_BASE = f"https://media.githubusercontent.com/media/SkillCorner/opendata/{UPSTREAM_COMMIT}/data"
 
 
 def http_get(rel: str) -> bytes:
@@ -155,6 +158,7 @@ def upload_match(fetch: Callable[[str], bytes], match_id: str, info: OpenDataMat
             source_name=SOURCE_NAME,
             source_url=SOURCE_URL,
             source_licence=SOURCE_LICENCE,
+            source_revision=UPSTREAM_COMMIT,
             **info.competition.as_kwargs(),
         )
 

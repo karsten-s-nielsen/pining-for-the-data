@@ -655,3 +655,58 @@ class TestCompetitionAndArtifactMeta:
         monkeypatch.setattr(sys, "argv", argv)
         upload_mod.main()
         assert {k: captured[k] for k in _FIELDS} == _FIELDS
+
+
+class TestUploadGameSourceRevision:
+    """source.revision pass-through in upload_game (opendata re-sync, ADR 0015). Invented data only."""
+
+    @staticmethod
+    def _written_entry(mock_s3, provider: str = "skillcorner") -> dict:
+        key = f"{provider}/matches.json"
+        for call in mock_s3.put_object.call_args_list:
+            if call.kwargs.get("Key") == key:
+                data = json.loads(call.kwargs["Body"].decode("utf-8"))
+                return data["matches"][-1]
+        raise AssertionError(f"no put_object for {key}")
+
+    @patch("mock_api.upload.boto3")
+    def test_writes_source_revision(self, mock_boto3: MagicMock, tmp_path: Path) -> None:
+        from mock_api.upload import upload_game
+
+        mock_s3 = MagicMock()
+        mock_boto3.client.return_value = mock_s3
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        mock_s3.get_object.side_effect = mock_s3.exceptions.NoSuchKey()
+        (tmp_path / "match.json").write_text("{}")
+
+        upload_game(
+            game_dir=tmp_path,
+            provider="skillcorner",
+            game_id="game_09",
+            bucket="b",
+            source_name="Synthetic Open Data",
+            source_revision="a" * 40,
+        )
+        entry = self._written_entry(mock_s3)
+        assert entry["source"]["revision"] == "a" * 40
+
+    @patch("mock_api.upload.boto3")
+    def test_no_revision_without_source_name(self, mock_boto3: MagicMock, tmp_path: Path) -> None:
+        from mock_api.upload import upload_game
+
+        mock_s3 = MagicMock()
+        mock_boto3.client.return_value = mock_s3
+        mock_s3.exceptions.NoSuchKey = type("NoSuchKey", (Exception,), {})
+        mock_s3.get_object.side_effect = mock_s3.exceptions.NoSuchKey()
+        (tmp_path / "match.json").write_text("{}")
+
+        upload_game(
+            game_dir=tmp_path,
+            provider="skillcorner",
+            game_id="game_09",
+            bucket="b",
+            source_name=None,
+            source_revision="a" * 40,
+        )
+        entry = self._written_entry(mock_s3)
+        assert "source" not in entry

@@ -156,7 +156,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 | `date` | `YYYY-MM-DD` | optional | Match date |
 | `home`, `away` | string | optional | Team names |
 | `provenance` | string | optional | `"redistributed"`, `"deidentified"` or `"original"` |
-| `source` | object | optional | `{name, url, licence}` of the upstream source |
+| `source` | object | optional | `{name, url, licence}` of the upstream source, plus an optional `revision` (the upstream VCS commit the bytes were fetched from, a 40-hex git SHA-1) when the source is pinned (e.g. SkillCorner Open Data, ADR 0015) |
 | `format_version` | integer | optional | `2` = the canonical Parquet/zstd set (ADR 0011); absent = legacy layout |
 | `competition_id` | string | optional | The provider's competition id, verbatim |
 | `competition_name` | string | optional | The provider's competition name, verbatim |

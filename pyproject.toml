@@ -1,6 +1,6 @@
 [project]
 name = "pining-for-the-data"
-version = "0.10.0"
+version = "0.11.0"
 description = "Open soccer tracking data — redistribution, validation, and mock provider API"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -87,6 +87,10 @@ select = [
 "scripts/verify_match_index_fields.py" = ["S310"]
 # Verifier: urllib.request to a configurable HTTPS API endpoint is the entire point (S310 false-positive).
 "scripts/verify_list_token_tier.py" = ["S310"]
+# Re-sync: urllib.request to the pinned raw/media opendata hosts is the entire point (S310 false-positive).
+"scripts/resync_skillcorner_opendata.py" = ["S310"]
+# Re-sync verifier: urllib.request to a configurable API endpoint + the pinned raw host (S310 false-positive).
+"scripts/verify_skillcorner_opendata_resync.py" = ["S310"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["deidentify", "formats", "publish", "mock_api", "canonical"]

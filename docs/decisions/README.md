@@ -20,6 +20,7 @@ This directory contains [Architecture Decision Records](https://adr.github.io/) 
 | [0012](0012-statsbomb-open-data-second-source-family.md) | StatsBomb Open-Data as a Second Source Family | Accepted | StatsBomb open-data tournaments owner-tier ingest (spec §9) |
 | [0013](0013-entry-change-contract-and-artifact-content-identity.md) | Entry Change Contract and Artifact Content Identity | Accepted | Competition/season fields + artifact identity (spec 2026-10-26) |
 | [0014](0014-list-only-token-tier.md) | List-Only Token Tier (`LIST`) and the Unset Guard for SSM Tokens | Accepted | Lakehouse v2 Ops Space list-only access (spec 2026-10-27) |
+| [0015](0015-skillcorner-opendata-pin-and-resync.md) | SkillCorner Open Data: commit pin, `source.revision`, and the conditional re-sync | Accepted | Pinned, reproducible opendata redistribution (spec 2026-10-27) |
 
 ## Format
 

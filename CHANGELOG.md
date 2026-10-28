@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-27
+
+### Added
+- **`source.revision`** on match and player index entries — an optional 40-hex git SHA-1 recording the upstream VCS commit the redistributed bytes were fetched from, on the shared `source` object (both JSON Schemas regenerated). ADR 0015.
+- `scripts/resync_skillcorner_opendata.py` — brings every public SkillCorner opendata entry to the pinned commit: it stamps `source.revision` on all of them and re-uploads only a `dynamic_events`/`phases_of_play` object whose sha256 differs. Each artifact PUT is conditional on its ETag (`If-Match`); the index is written per match with the ETag re-read each iteration, so a `412` aborts only that match. An unexpected `match`/`tracking` drift, a missing `source`, or an upstream `404` is reported and that match is stopped — never a silent re-upload, never a delete. Two dry-run preflights confirm the pinned commit-SHA media ref (HTTP `206`) and that the bucket honours `If-Match`.
+- `scripts/verify_skillcorner_opendata_resync.py` — proves, against the live API and store, that every public opendata entry carries the pin and that all four of its artifacts match the pin **from the stored bytes** (tracking downloaded and hashed) and equal `artifact_meta`.
+
+### Changed
+- **Public SkillCorner Open Data is pinned to a named upstream commit** (`4340d274572876239c154c90bc507a9b3250a656`, 2026-09-14) — the loader `scripts/upload_skillcorner_opendata.py` no longer fetches from the floating `master` ref, so the redistribution is reproducible. Moving the pin is a deliberate one-line change plus a re-run (ADR 0015).
+- Test count: 724 → 768 (+44 tests: the schema field, the `upload_game` pass-through and loader pin, the re-sync pure core and `main` with injected S3, the verify checks, and the review-hardening set — the listing drop-out guard (unit and `main`), the stored-vs-pin and tracking-from-bytes verify cases, the mid-match and index-write `412` aborts with already-re-put reporting, the dry-run field diff, the Content-Type-preserving re-PUT, the entry-assembly stop, and the carry-refusal guard).
+
 ## [0.10.0] - 2026-10-27
 
 ### Added
@@ -203,7 +214,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ARCHITECTURE.md with C4 diagrams
 - CI pipeline (ruff, pyright, pytest) via GitHub Actions
 
-[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/karsten-s-nielsen/pining-for-the-data/compare/v0.8.0...v0.8.1

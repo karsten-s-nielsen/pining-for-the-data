@@ -36,6 +36,11 @@ class _SourceMeta(BaseModel):
     name: str
     url: str = ""
     licence: str = ""
+    revision: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{40}$",
+        description="Upstream VCS commit the redistributed bytes were fetched from (git SHA-1).",
+    )
 
 
 class ArtifactMeta(BaseModel):

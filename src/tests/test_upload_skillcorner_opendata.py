@@ -110,3 +110,13 @@ class TestFetchResolved:
     def test_raises_on_empty(self, opendata_adapter) -> None:
         with pytest.raises(ValueError, match="empty"):
             opendata_adapter.fetch_resolved("x.jsonl", raw=lambda r: b"", media=lambda r: b"UNUSED")
+
+
+class TestLoaderIsPinned:
+    def test_pinned_to_upstream_commit(self, opendata_adapter) -> None:
+        commit = "4340d274572876239c154c90bc507a9b3250a656"  # pragma: allowlist secret (public git SHA)
+        assert opendata_adapter.UPSTREAM_COMMIT == commit
+        assert "/master/" not in opendata_adapter.RAW_BASE
+        assert "/master/" not in opendata_adapter.MEDIA_BASE
+        assert commit in opendata_adapter.RAW_BASE
+        assert commit in opendata_adapter.MEDIA_BASE

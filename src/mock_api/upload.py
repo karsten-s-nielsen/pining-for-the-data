@@ -34,6 +34,7 @@ def upload_game(
     source_name: str | None = None,
     source_url: str | None = None,
     source_licence: str | None = None,
+    source_revision: str | None = None,
     format_version: int | None = None,
     competition_id: str | None = None,
     competition_name: str | None = None,
@@ -109,6 +110,7 @@ def upload_game(
             source_name,
             source_url,
             source_licence,
+            source_revision,
             format_version,
             competition={
                 "competition_id": native_id(competition_id, "competition_id"),
@@ -153,6 +155,7 @@ def _build_match_entry(
     source_name: str | None,
     source_url: str | None,
     source_licence: str | None,
+    source_revision: str | None,
     format_version: int | None,
     competition: dict[str, str | None],
     artifact_meta: dict[str, dict[str, str | int]],
@@ -180,6 +183,9 @@ def _build_match_entry(
             "url": source_url or "",
             "licence": source_licence or "",
         }
+        # Only a value the source gives is written (ADR 0010); revision rides the source gate.
+        if source_revision:
+            payload["source"]["revision"] = source_revision
     # Absent values stay absent (ADR 0010): only a value the source gives is written.
     payload.update({k: v for k, v in competition.items() if v is not None})
     payload["artifact_meta"] = artifact_meta
@@ -293,6 +299,11 @@ def main() -> None:
     )
     parser.add_argument("--source-name", default=None, help="Name of the original data source")
     parser.add_argument("--source-url", default=None, help="URL of the original data source")
+    parser.add_argument(
+        "--source-revision",
+        default=None,
+        help="Upstream VCS commit the redistributed bytes were fetched from (40-hex git SHA-1)",
+    )
     # Both spellings populate `source_licence`. British is canonical; American
     # is a quiet alias (no deprecation warning). Spec §8.2.1.
     parser.add_argument(
@@ -338,6 +349,7 @@ def main() -> None:
         source_name=args.source_name,
         source_url=args.source_url,
         source_licence=args.source_licence,
+        source_revision=args.source_revision,
         format_version=args.format_version,
         competition_id=args.competition_id,
         competition_name=args.competition_name,

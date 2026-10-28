@@ -23,8 +23,10 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
             skillcornerRawOrchestrator = container "SkillCorner Raw Ingest Orchestrator" "One-shot script: ingest a raw-JSON SkillCorner delivery (CL, PL 25/26) into the canonical owner tier (format_version=2), skipping defective matches; drive uploadCli + uploadPlayersCli" "Python 3.12+, scripts/upload_skillcorner_raw.py"
             skillcornerParquetOrchestrator = container "SkillCorner Parquet-Family Ingest Orchestrator" "One-shot script: ingest a parquet-processed SkillCorner delivery (RM, PL 24/25) into the canonical owner tier (format_version=2), skipping events-less matches; drive uploadCli + uploadPlayersCli" "Python 3.12+, scripts/upload_skillcorner_parquet.py"
             skillcornerCanonicalVerify = container "SkillCorner Canonical Verify Script" "Post-load HTTP verification: tracking is Parquet, freeze_frames 404s, format_version=2, required artifacts fetch" "Python 3.12+, scripts/verify_skillcorner_canonical_load.py"
-            skillcornerOpendataOrchestrator = container "SkillCorner Public Open-Data Orchestrator" "Fetches the public SkillCorner Open Data repo (anonymous HTTPS), resolving Git-LFS *.jsonl tracking pointers via the media host (sha256/size-verified); redistributes each new match's four artifacts + a public players catalogue as-is (public tier); idempotent, competition-agnostic" "Python 3.12+, scripts/upload_skillcorner_opendata.py"
+            skillcornerOpendataOrchestrator = container "SkillCorner Public Open-Data Orchestrator" "Fetches the public SkillCorner Open Data repo (anonymous HTTPS), resolving Git-LFS *.jsonl tracking pointers via the media host (sha256/size-verified); redistributes each new match's four artifacts + a public players catalogue as-is (public tier); idempotent, competition-agnostic; pinned to a named upstream commit (ADR 0015), recorded in each entry's source.revision" "Python 3.12+, scripts/upload_skillcorner_opendata.py"
             skillcornerOpendataVerify = container "SkillCorner Public Open-Data Verify Script" "Post-load HTTP verification (public token): match count incl. every new id, skillcorner in /providers, non-empty /players, a sampled new match serves its four id-prefixed artifacts, and each new match's tracking body is real JSONL (not an unresolved Git-LFS pointer)" "Python 3.12+, scripts/verify_skillcorner_opendata_load.py"
+            skillcornerOpendataResync = container "SkillCorner Public Open-Data Re-sync" "Brings every public opendata entry to the pinned commit: stamps source.revision on all, re-uploads only a dynamic_events/phases_of_play object whose sha256 differs (per-object If-Match); per-match index write with the ETag re-read each iteration; match/tracking/no-source drift report-and-stops; upsert-only, never deletes; two dry-run preflights (media 206, If-Match 412) (ADR 0015)" "Python 3.12+, scripts/resync_skillcorner_opendata.py"
+            skillcornerOpendataResyncVerify = container "SkillCorner Public Open-Data Re-sync Verify Script" "Post-resync HTTP verification (public token): every public entry carries source.revision == the pin, and all four artifacts of every entry match the pin from the STORED bytes (tracking downloaded + hashed; pin identity via the LFS pointer oid) and equal artifact_meta (ADR 0015)" "Python 3.12+, scripts/verify_skillcorner_opendata_resync.py"
             statsbombOrchestrator = container "StatsBomb Orchestrator" "One-shot script: delivery-coherence pre-flight, de-pivot + re-nest the match row to feed shape, stage/gzip the four role-aligned artifacts, drive uploadCli + uploadPlayersCli (owner tier)" "Python 3.12+, scripts/upload_statsbomb_club.py"
             statsbombOpenOrchestrator = container "StatsBomb Open-Data Orchestrator" "One-shot script: fetch+cache the real open-data feed over raw HTTPS, delivery-coherence pre-flight, build_metadata_open reshape (no de-pivot/join — the real feed), same-tier skip-and-report players, two-dir stage of the four role artifacts, drive uploadCli + uploadPlayersCli (owner tier, provenance=redistributed, ADR 0012)" "Python 3.12+, scripts/upload_statsbomb_open.py"
             matchIndexBackfill = container "Match Index Backfill" "One-shot, two-pass: sets competition/season fields + artifact_meta on every live entry; pass 1 reads, checks, hashes (any error stops it); pass 2 IfMatch write (ADR 0013)" "Python 3.12+, scripts/backfill_match_competition_and_artifact_meta.py"
@@ -86,6 +88,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         operator -> skillcornerCanonicalVerify "Runs canonical-format post-load verification" "Shell"
         operator -> skillcornerOpendataOrchestrator "Ingests the public SkillCorner Open Data (A-League, public tier)" "Shell"
         operator -> skillcornerOpendataVerify "Runs public SkillCorner open-data post-load verification" "Shell"
+        operator -> skillcornerOpendataResync "Re-syncs drifted opendata artifacts to the pin (dry-run, then --apply)" "Shell"
+        operator -> skillcornerOpendataResyncVerify "Runs post-resync verification against the pin" "Shell"
         operator -> statsbombOrchestrator "Loads the commercial StatsBomb 360 delivery (owner tier)" "Shell"
         operator -> statsbombOpenOrchestrator "Loads the open-data tournament 360 (owner tier)" "Shell"
         operator -> statsbombVerify "Runs StatsBomb post-load verification" "Shell"
@@ -96,6 +100,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
 
         skillcorner -> formats "Source tracking data (git clone)" "Git LFS"
         skillcorner -> skillcornerOpendataOrchestrator "Fetches the public open-data feed over anonymous raw HTTPS, resolving Git-LFS tracking blobs via the media host (sha256/size-verified)" "HTTPS"
+        skillcorner -> skillcornerOpendataResync "Fetches the four artifacts at the pinned commit over raw HTTPS; tracking identity via the LFS pointer oid (no blob download)" "HTTPS"
+        skillcorner -> skillcornerOpendataResyncVerify "Fetches the pinned upstream file identity for the stored-vs-pin comparison" "HTTPS"
         gradientSports -> gradientOrchestrator "Source bundle (operator-downloaded copy)" "Filesystem"
         idsse -> idsseOrchestrator "Source DFL XML (version-pinned figshare fetch, md5-verified)" "HTTPS"
         skillcornerRestricted -> skillcornerRestrictedOrchestrator "Source bundle (operator-downloaded copy)" "Filesystem"
@@ -134,6 +140,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         skillcornerOpendataOrchestrator -> uploadCli "Drives per-match upload (visibility=public, provenance=redistributed)" "Python import"
         skillcornerOpendataOrchestrator -> uploadPlayersCli "Drives public player catalogue upload; cross-tier collision skip-and-report" "Python import"
         skillcornerOpendataVerify -> apiGateway "Polls public endpoints; asserts match count, players, and the four artifacts served" "HTTPS"
+        skillcornerOpendataResync -> dataBucket "Re-uploads drifted dynamic_events/phases_of_play (per-object If-Match) and rewrites matches.json per match (ETag re-read each iteration); upsert-only" "boto3 S3 API"
+        skillcornerOpendataResyncVerify -> apiGateway "Downloads every public artifact; hashes the stored bytes against the pin and artifact_meta" "HTTPS + public token"
         statsbombOrchestrator -> formats "Reads, de-pivots and re-nests the delivered bundle (ADR 0010)" "Python import"
         statsbombOrchestrator -> uploadCli "Drives per-match upload (visibility=private)" "Python import"
         statsbombOrchestrator -> uploadPlayersCli "Drives player catalogue upload (visibility=private)" "Python import"
@@ -233,6 +241,8 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
                 containerInstance skillcornerCanonicalVerify
                 containerInstance skillcornerOpendataOrchestrator
                 containerInstance skillcornerOpendataVerify
+                containerInstance skillcornerOpendataResync
+                containerInstance skillcornerOpendataResyncVerify
                 containerInstance statsbombOrchestrator
                 containerInstance statsbombOpenOrchestrator
                 containerInstance statsbombVerify
@@ -252,7 +262,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
         }
 
         # Level 2 is split into one runtime view plus per-concern / per-provider
-        # slices. A single `include *` container view renders all 33 containers
+        # slices. A single `include *` container view renders all 35 containers
         # (41 element nodes) — past the ~15-per-view readability guideline, and it
         # degraded with every provider added (each brings an orchestrator + a
         # verify script). The split is a VIEWS-only concern: the model is
@@ -301,6 +311,7 @@ workspace "pining-for-the-data" "Open + restricted soccer tracking data redistri
 
         container pining "Containers_SkillCornerPublic" {
             include operator skillcorner skillcornerOpendataOrchestrator skillcornerOpendataVerify
+            include skillcornerOpendataResync skillcornerOpendataResyncVerify dataBucket apiGateway
             include formats uploadCli uploadPlayersCli dataBucket apiGateway
             autoLayout
         }

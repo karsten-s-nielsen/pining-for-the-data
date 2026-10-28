@@ -12,7 +12,7 @@ Companion repo to luxury-lakehouse.
 - `src/tests/` — pytest test suite
 - `schemas/` — Published JSON Schemas for `matches.json` and `players.json` (generated from Pydantic models in `src/canonical/models.py`; drift-tested in CI; models kept out of the Lambda zip so the runtime stays pydantic-free)
 - `src/canonical/` — Canonical Pydantic models (`MatchEntry`, `PlayerRecord`); imported by upload CLIs + schema regenerator + tests
-- `scripts/` — one-shot ops scripts: per-provider load + post-load verify pairs; owner-tier SkillCorner canonical ingest via two source-family adapters sharing one verify (ADR 0011); Public-tier SkillCorner Open Data redistribution; Completed one-shot migrations retained as the audit trail. See docs/context/scripts-and-migrations.md.
+- `scripts/` — one-shot ops scripts: per-provider load + post-load verify pairs; owner-tier SkillCorner canonical ingest via two source-family adapters sharing one verify (ADR 0011); Public-tier SkillCorner Open Data redistribution (pinned to a named upstream commit, recorded in `source.revision` — ADR 0015) plus its conditional re-sync; Completed one-shot migrations retained as the audit trail. See docs/context/scripts-and-migrations.md.
 - `name_pools/` — JSON name lists (fictional first/last names, cities)
 - `rosters/` — generated de-identified roster JSONs per game
 - `terraform/` — AWS infrastructure (S3 + API Gateway + Lambda + SSM + KMS + CloudTrail); modules for audit (CloudTrail data events) and observability (CloudWatch alarms, SNS topic, dashboard — ADR 0007)

@@ -39,6 +39,20 @@
           "default": "",
           "title": "Licence",
           "type": "string"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Upstream VCS commit the redistributed bytes were fetched from (git SHA-1).",
+          "title": "Revision"
         }
       },
       "required": [
